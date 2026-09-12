@@ -46,9 +46,13 @@ func nodeForeignKeyConstraintTableDef(ctx *Context, node *tree.ForeignKeyConstra
 	for i := range node.FromCols {
 		fromCols[i] = vitess.NewColIdent(string(node.FromCols[i]))
 	}
-	toCols := make([]vitess.ColIdent, len(node.ToCols))
-	for i := range node.ToCols {
-		toCols[i] = vitess.NewColIdent(string(node.ToCols[i]))
+	toCols := make([]vitess.ColIdent, 0, len(node.ToCols))
+	// The PostgreSQL parser represents an omitted referenced-column list as one empty name. Preserve that distinction
+	// as an empty slice for the plan builder and analyzer rather than a reference to column "".
+	if len(node.ToCols) != 1 || node.ToCols[0] != "" {
+		for i := range node.ToCols {
+			toCols = append(toCols, vitess.NewColIdent(string(node.ToCols[i])))
+		}
 	}
 	var refActions [2]vitess.ReferenceAction
 	for i, refAction := range []tree.RefAction{node.Actions.Delete, node.Actions.Update} {

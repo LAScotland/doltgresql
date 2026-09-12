@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dolthub/dolt/go/libraries/doltcore/doltdb"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/analyzer"
 	"github.com/dolthub/go-mysql-server/sql/plan"
@@ -30,6 +31,15 @@ import (
 // generateForeignKeyName populates a generated foreign key name, in the Postgres default foreign key name format,
 // when a foreign key is created without an explicit name specified.
 func generateForeignKeyName(ctx *sql.Context, _ *analyzer.Analyzer, n sql.Node, _ *plan.Scope, _ analyzer.RuleSelector, _ *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
+	return populateForeignKeyDefaults(ctx, n, true)
+}
+
+// resolveImplicitForeignKeyColumns runs before GMS foreign-key validation, which requires concrete parent columns.
+func resolveImplicitForeignKeyColumns(ctx *sql.Context, _ *analyzer.Analyzer, n sql.Node, _ *plan.Scope, _ analyzer.RuleSelector, _ *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
+	return populateForeignKeyDefaults(ctx, n, false)
+}
+
+func populateForeignKeyDefaults(ctx *sql.Context, n sql.Node, generateNames bool) (sql.Node, transform.TreeIdentity, error) {
 	return transform.Node(ctx, n, func(ctx *sql.Context, n sql.Node) (sql.Node, transform.TreeIdentity, error) {
 		switch n := n.(type) {
 		case *plan.CreateTable:
@@ -45,7 +55,16 @@ func generateForeignKeyName(ctx *sql.Context, _ *analyzer.Analyzer, n sql.Node, 
 			}
 			changedForeignKey := false
 			for _, fk := range copiedForeignKeys {
-				if fk.Name == "" {
+				if len(fk.ParentColumns) == 0 {
+					parentColumns, parentSchema, err := resolveImplicitForeignKeyParentColumns(ctx, fk, n.Name(), schemaName, n.PkSchema())
+					if err != nil {
+						return nil, transform.SameTree, err
+					}
+					fk.ParentColumns = parentColumns
+					fk.ParentSchema = parentSchema
+					changedForeignKey = true
+				}
+				if generateNames && fk.Name == "" {
 					generatedName, err := generateFkName(ctx, n.Name(), fk)
 					if err != nil {
 						return nil, transform.SameTree, err
@@ -77,13 +96,23 @@ func generateForeignKeyName(ctx *sql.Context, _ *analyzer.Analyzer, n sql.Node, 
 			}
 
 		case *plan.CreateForeignKey:
-			if n.FkDef.Name == "" {
+			if (generateNames && n.FkDef.Name == "") || len(n.FkDef.ParentColumns) == 0 {
 				copiedFk := *n.FkDef
-				generatedName, err := generateFkName(ctx, copiedFk.Table, &copiedFk)
-				if err != nil {
-					return nil, transform.SameTree, err
+				if len(copiedFk.ParentColumns) == 0 {
+					parentColumns, parentSchema, err := resolveImplicitForeignKeyParentColumns(ctx, &copiedFk, "", "", sql.PrimaryKeySchema{})
+					if err != nil {
+						return nil, transform.SameTree, err
+					}
+					copiedFk.ParentColumns = parentColumns
+					copiedFk.ParentSchema = parentSchema
 				}
-				copiedFk.Name = generatedName
+				if generateNames && copiedFk.Name == "" {
+					generatedName, err := generateFkName(ctx, copiedFk.Table, &copiedFk)
+					if err != nil {
+						return nil, transform.SameTree, err
+					}
+					copiedFk.Name = generatedName
+				}
 				return &plan.CreateForeignKey{
 					DbProvider: n.DbProvider,
 					FkDef:      &copiedFk,
@@ -96,6 +125,75 @@ func generateForeignKeyName(ctx *sql.Context, _ *analyzer.Analyzer, n sql.Node, 
 			return n, transform.SameTree, nil
 		}
 	})
+}
+
+// resolveImplicitForeignKeyParentColumns implements PostgreSQL's REFERENCES table shorthand by resolving it to the
+// referenced table's primary key, preserving the primary key's declared column order. For CREATE TABLE, the table
+// under construction participates at its normal position in the search path.
+func resolveImplicitForeignKeyParentColumns(
+	ctx *sql.Context,
+	fk *sql.ForeignKeyConstraint,
+	createdTableName string,
+	createdTableSchema string,
+	createdTablePkSchema sql.PrimaryKeySchema,
+) ([]string, string, error) {
+	var schemas []string
+	if fk.ParentSchema != "" {
+		schemas = []string{fk.ParentSchema}
+	} else {
+		var err error
+		schemas, err = core.SearchPath(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
+	for _, schemaName := range schemas {
+		tbl, err := core.GetSqlTableFromContext(ctx, fk.ParentDatabase, doltdb.TableName{Name: fk.ParentTable, Schema: schemaName})
+		if err != nil {
+			return nil, "", err
+		}
+		if tbl != nil {
+			return validateImplicitForeignKeyPrimaryKey(primaryKeyColumnNames(ctx, tbl), fk, schemaName)
+		}
+		if createdTableName != "" && strings.EqualFold(fk.ParentTable, createdTableName) && strings.EqualFold(schemaName, createdTableSchema) {
+			return validateImplicitForeignKeyPrimaryKey(primaryKeyColumnNamesFromSchema(createdTablePkSchema), fk, schemaName)
+		}
+	}
+
+	// Leave missing-table diagnostics to the normal analyzer path. This branch should only be reached for an invalid
+	// reference, because a valid omitted-column reference must resolve to either an existing table or the table being
+	// created.
+	return nil, fk.ParentSchema, nil
+}
+
+func primaryKeyColumnNames(ctx *sql.Context, tbl sql.Table) []string {
+	pkTable, ok := tbl.(sql.PrimaryKeyTable)
+	if !ok {
+		return nil
+	}
+	return primaryKeyColumnNamesFromSchema(pkTable.PrimaryKeySchema(ctx))
+}
+
+func primaryKeyColumnNamesFromSchema(pkSchema sql.PrimaryKeySchema) []string {
+	if len(pkSchema.PkOrdinals) == 0 {
+		return nil
+	}
+	columns := make([]string, len(pkSchema.PkOrdinals))
+	for i, ordinal := range pkSchema.PkOrdinals {
+		columns[i] = pkSchema.Schema[ordinal].Name
+	}
+	return columns
+}
+
+func validateImplicitForeignKeyPrimaryKey(columns []string, fk *sql.ForeignKeyConstraint, schemaName string) ([]string, string, error) {
+	if len(columns) == 0 {
+		return nil, "", fmt.Errorf(`there is no primary key for referenced table "%s"`, fk.ParentTable)
+	}
+	if len(fk.Columns) != len(columns) {
+		return nil, "", fmt.Errorf("number of referencing and referenced columns for foreign key disagree")
+	}
+	return columns, schemaName, nil
 }
 
 // generateFkName creates a default foreign key name, according to Postgres naming rules

@@ -107,6 +107,128 @@ func TestForeignKeys(t *testing.T) {
 				},
 			},
 			{
+				Name: "omitted referenced columns use the primary key",
+				SetUpScript: []string{
+					`CREATE TABLE implicit_parent (id INT PRIMARY KEY)`,
+					`CREATE TABLE implicit_child (id INT PRIMARY KEY, parent_id INT REFERENCES implicit_parent ON DELETE CASCADE)`,
+					`INSERT INTO implicit_parent VALUES (1)`,
+					`INSERT INTO implicit_child VALUES (10, 1)`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `INSERT INTO implicit_child VALUES (11, 999)`, ExpectedErr: "Foreign key violation"},
+					{Query: `DELETE FROM implicit_parent WHERE id = 1`},
+					{Query: `SELECT * FROM implicit_child`, Expected: []sql.Row{}},
+				},
+			},
+			{
+				Name: "omitted referenced columns preserve composite primary key order",
+				SetUpScript: []string{
+					`CREATE TABLE implicit_composite_parent (a INT, b INT, PRIMARY KEY (b, a))`,
+					`CREATE TABLE implicit_composite_child (x INT, y INT, FOREIGN KEY (x, y) REFERENCES implicit_composite_parent)`,
+					`INSERT INTO implicit_composite_parent VALUES (10, 1)`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `INSERT INTO implicit_composite_child VALUES (1, 10)`},
+					{Query: `INSERT INTO implicit_composite_child VALUES (10, 1)`, ExpectedErr: "Foreign key violation"},
+				},
+			},
+			{
+				Name: "omitted referenced columns require a primary key",
+				SetUpScript: []string{
+					`CREATE TABLE implicit_unique_parent (id INT UNIQUE)`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `CREATE TABLE implicit_unique_child (parent_id INT REFERENCES implicit_unique_parent)`, ExpectedErr: `there is no primary key for referenced table "implicit_unique_parent"`},
+				},
+			},
+			{
+				Name: "omitted referenced columns validate arity",
+				SetUpScript: []string{
+					`CREATE TABLE implicit_arity_parent (a INT, b INT, PRIMARY KEY (a, b))`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `CREATE TABLE implicit_arity_child (parent_id INT REFERENCES implicit_arity_parent)`, ExpectedErr: "number of referencing and referenced columns for foreign key disagree"},
+				},
+			},
+			{
+				Name: "omitted referenced columns reject a missing table",
+				Assertions: []ScriptTestAssertion{
+					{Query: `CREATE TABLE implicit_missing_child (parent_id INT REFERENCES implicit_missing_parent)`, ExpectedErr: "table not found"},
+				},
+			},
+			{
+				Name: "omitted referenced columns support self references",
+				SetUpScript: []string{
+					`CREATE SCHEMA implicit_self_schema`,
+					`CREATE TABLE implicit_self_schema.nodes (id INT PRIMARY KEY, parent_id INT REFERENCES implicit_self_schema.nodes ON DELETE SET NULL)`,
+					`INSERT INTO implicit_self_schema.nodes VALUES (1, NULL), (2, 1)`,
+					`DELETE FROM implicit_self_schema.nodes WHERE id = 1`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `SELECT * FROM implicit_self_schema.nodes`, Expected: []sql.Row{{2, nil}}},
+				},
+			},
+			{
+				Name: "omitted referenced columns support unqualified same-schema self references",
+				SetUpScript: []string{
+					`CREATE SCHEMA implicit_unqualified_self`,
+					`SET search_path = implicit_unqualified_self`,
+					`CREATE TABLE nodes (id INT PRIMARY KEY, parent_id INT REFERENCES nodes ON DELETE SET NULL)`,
+					`INSERT INTO nodes VALUES (1, NULL), (2, 1)`,
+					`DELETE FROM nodes WHERE id = 1`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `SELECT * FROM nodes`, Expected: []sql.Row{{2, nil}}},
+				},
+			},
+			{
+				Name: "an earlier search_path table shadows a same-named table under construction",
+				SetUpScript: []string{
+					`CREATE SCHEMA implicit_shadow_first`,
+					`CREATE SCHEMA implicit_shadow_second`,
+					`CREATE TABLE implicit_shadow_first.parent (first_id INT PRIMARY KEY)`,
+					`SET search_path = implicit_shadow_first, implicit_shadow_second`,
+					`CREATE TABLE implicit_shadow_second.parent (id INT PRIMARY KEY, parent_id INT REFERENCES parent)`,
+					`INSERT INTO implicit_shadow_first.parent VALUES (7)`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `INSERT INTO implicit_shadow_second.parent VALUES (1, 7)`},
+					{Query: `INSERT INTO implicit_shadow_second.parent VALUES (2, 1)`, ExpectedErr: "Foreign key violation"},
+				},
+			},
+			{
+				Name: "omitted referenced columns follow search_path and pin the resolved schema",
+				SetUpScript: []string{
+					`CREATE SCHEMA implicit_first`,
+					`CREATE SCHEMA implicit_second`,
+					`CREATE TABLE implicit_first.parent (first_id INT PRIMARY KEY)`,
+					`CREATE TABLE implicit_second.parent (second_id INT PRIMARY KEY)`,
+					`SET search_path = implicit_first, implicit_second`,
+					`CREATE TABLE implicit_second.child (parent_id INT REFERENCES parent)`,
+					`INSERT INTO implicit_first.parent VALUES (1)`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `INSERT INTO implicit_second.child VALUES (1)`},
+					{Query: `INSERT INTO implicit_second.child VALUES (2)`, ExpectedErr: "Foreign key violation"},
+					{Query: `SELECT confrelid::regclass::text FROM pg_constraint WHERE conrelid = 'implicit_second.child'::regclass AND contype = 'f'`, Expected: []sql.Row{{"parent"}}},
+				},
+			},
+			{
+				Name: "ALTER TABLE omitted referenced columns use primary key and preserve actions",
+				SetUpScript: []string{
+					`CREATE TABLE implicit_alter_parent (id INT PRIMARY KEY)`,
+					`CREATE TABLE implicit_alter_child (parent_id INT)`,
+					`ALTER TABLE implicit_alter_child ADD FOREIGN KEY (parent_id) REFERENCES implicit_alter_parent ON DELETE CASCADE`,
+					`INSERT INTO implicit_alter_parent VALUES (1)`,
+					`INSERT INTO implicit_alter_child VALUES (1)`,
+				},
+				Assertions: []ScriptTestAssertion{
+					{Query: `INSERT INTO implicit_alter_child VALUES (2)`, ExpectedErr: "Foreign key violation"},
+					{Query: `DELETE FROM implicit_alter_parent WHERE id = 1`},
+					{Query: `SELECT * FROM implicit_alter_child`, Expected: []sql.Row{}},
+				},
+			},
+			{
 				// See https://github.com/morenoh149/postgresDBSamples/blob/master/french-towns-communes-francaises/french-towns-communes-francaises.sql
 				Name: "inline column REFERENCES enforces constraints across a chain of related tables",
 				SetUpScript: []string{

@@ -37,6 +37,7 @@ const (
 	ruleId_AssignTriggers                                                // assignTriggers
 	ruleId_AssignUpdateCasts                                             // assignUpdateCasts
 	ruleId_ConvertDropPrimaryKeyConstraint                               // convertDropPrimaryKeyConstraint
+	ruleId_ResolveImplicitFk                                             // resolveImplicitForeignKeyColumns
 	ruleId_GenerateForeignKeyName                                        // generateForeignKeyName
 	ruleId_ReplaceNode                                                   // replaceNode
 	ruleId_TransformRecordFilter                                         // transformRecordFilter
@@ -66,7 +67,9 @@ func Init() {
 		{Id: ruleId_AddLikePrefixRanges, Apply: AddLikePrefixRanges},
 		{Id: ruleId_ApplyTablesForAnalyzeAllTables, Apply: applyTablesForAnalyzeAllTables},
 		{Id: ruleId_ConvertDropPrimaryKeyConstraint, Apply: convertDropPrimaryKeyConstraint},
-		{Id: ruleId_ResolveTableForDDL, Apply: resolveTableForDDL}},
+		{Id: ruleId_ResolveTableForDDL, Apply: resolveTableForDDL},
+		// Resolve omitted REFERENCES columns before GMS validates foreign keys.
+		{Id: ruleId_ResolveImplicitFk, Apply: resolveImplicitForeignKeyColumns}},
 		analyzer.OnceBeforeDefault...)
 
 	analyzer.AlwaysBeforeDefault = append(analyzer.AlwaysBeforeDefault,
