@@ -426,9 +426,9 @@ func nodeExpr(ctx *Context, node tree.Expr) (vitess.Expr, error) {
 		case tree.NotLike:
 			operator = vitess.NotLikeStr
 		case tree.ILike:
-			return nil, errors.Errorf("ILIKE is not yet supported")
+			return vitess.InjectedExpr{Expression: pgexprs.NewILike(false), Children: vitess.Exprs{left, right}}, nil
 		case tree.NotILike:
-			return nil, errors.Errorf("ILIKE is not yet supported")
+			return vitess.InjectedExpr{Expression: pgexprs.NewILike(true), Children: vitess.Exprs{left, right}}, nil
 		case tree.SimilarTo:
 			return nil, errors.Errorf("similar to is not yet supported")
 		case tree.NotSimilarTo:

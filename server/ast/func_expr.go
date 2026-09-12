@@ -71,6 +71,15 @@ func nodeFuncExpr(ctx *Context, node *tree.FuncExpr) (vitess.Expr, error) {
 	}
 
 	switch strings.ToLower(name.String()) {
+	case "ilike_escape", "not_ilike_escape":
+		if len(node.Exprs) != 3 {
+			return nil, errors.Errorf("%s requires three arguments", name.String())
+		}
+		children, err := nodeExprs(ctx, node.Exprs)
+		if err != nil {
+			return nil, err
+		}
+		return vitess.InjectedExpr{Expression: pgexprs.NewILike(strings.EqualFold(name.String(), "not_ilike_escape")), Children: children}, nil
 	// special case for string_agg, which maps to the mysql aggregate function group_concat
 	case "string_agg":
 		if len(node.Exprs) != 2 {
