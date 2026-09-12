@@ -2190,6 +2190,11 @@ func TestJsonFunctions(t *testing.T) {
 					Expected:         []sql.Row{{`[1,"2",3]`}},
 				},
 				{
+					Query:            `SELECT json_build_array(1, 'two'::text, NULL, ARRAY[3,4], json_build_object('five', 5));`,
+					ExpectedColNames: []string{"json_build_array"},
+					Expected:         []sql.Row{{`[1,"two",null,[3,4],{"five":5}]`}},
+				},
+				{
 					Query:            `SELECT json_build_array(json_build_object('value', 7));`,
 					ExpectedColNames: []string{"json_build_array"},
 					Expected:         []sql.Row{{`[{"value":7}]`}},
@@ -2223,6 +2228,11 @@ func TestJsonFunctions(t *testing.T) {
 					ExpectedColNames: []string{"json_build_object"},
 					Expected:         []sql.Row{{`{"nested":{"value":7}}`}},
 				},
+				{
+					Query:            `SELECT json_build_object('number', 1, 'text', 'two'::text, 'null', NULL, 'array', ARRAY[3,4], 'json', json_build_array(5));`,
+					ExpectedColNames: []string{"json_build_object"},
+					Expected:         []sql.Row{{`{"array":[3,4],"json":[5],"null":null,"number":1,"text":"two"}`}},
+				},
 			},
 		},
 		{
@@ -2243,6 +2253,11 @@ func TestJsonFunctions(t *testing.T) {
 					Expected:         []sql.Row{{`[1, "2", 3]`}},
 				},
 				{
+					Query:            `SELECT jsonb_build_array(1, 'two'::text, NULL, ARRAY[3,4], jsonb_build_object('five', 5));`,
+					ExpectedColNames: []string{"jsonb_build_array"},
+					Expected:         []sql.Row{{`[1, "two", null, [3, 4], {"five": 5}]`}},
+				},
+				{
 					Query:            `SELECT jsonb_build_array(jsonb_path_query_first('{"a":[1,2]}'::jsonb, '$.*'), jsonb_path_query_first('{"a":null}'::jsonb, '$.*'));`,
 					ExpectedColNames: []string{"jsonb_build_array"},
 					Expected:         []sql.Row{{`[[1, 2], null]`}},
@@ -2253,9 +2268,18 @@ func TestJsonFunctions(t *testing.T) {
 					Expected:         []sql.Row{{`[{"stored": true}]`}},
 				},
 				{
+					Query:            `SELECT jsonb_build_object('id', id, 'value', jsonb_path_query_first(doc, '$.*'), 'missing', NULL) FROM json_build_array_docs WHERE id = 1;`,
+					ExpectedColNames: []string{"jsonb_build_object"},
+					Expected:         []sql.Row{{`{"id": 1, "value": {"stored": true}, "missing": null}`}},
+				},
+				{
 					Query:            `SELECT jsonb_build_array(ARRAY[1,2]);`,
 					ExpectedColNames: []string{"jsonb_build_array"},
 					Expected:         []sql.Row{{`[[1, 2]]`}},
+				},
+				{
+					Query:       `SELECT jsonb_build_array(VARIADIC ARRAY[1,2]);`,
+					ExpectedErr: "unimplemented: this syntax",
 				},
 				{
 					Query:            `SELECT jsonb_build_array();`,

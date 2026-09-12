@@ -229,16 +229,15 @@ var json_send = framework.Function1{
 }
 
 // json_build_array represents the PostgreSQL function json_build_array.
-var json_build_array = framework.Function1{
+var json_build_array = framework.Function1N{
 	Name:       "json_build_array",
 	Return:     pgtypes.Json,
-	Parameters: [1]*pgtypes.DoltgresType{pgtypes.AnyArray},
-	Variadic:   true,
+	Parameters: [1]*pgtypes.DoltgresType{pgtypes.Any},
 	Callable:   json_build_array_callable,
 }
 
-func json_build_array_callable(ctx *sql.Context, _ [2]*pgtypes.DoltgresType, val1 any) (any, error) {
-	inputArray := val1.([]any)
+func json_build_array_callable(ctx *sql.Context, _ []*pgtypes.DoltgresType, val1 any, vals []any) (any, error) {
+	inputArray := append([]any{val1}, vals...)
 	jsonArray := make([]any, len(inputArray))
 	for i, value := range inputArray {
 		if wrapper, ok := value.(sql.JSONWrapper); ok {
@@ -254,16 +253,15 @@ func json_build_array_callable(ctx *sql.Context, _ [2]*pgtypes.DoltgresType, val
 }
 
 // json_build_object represents the PostgreSQL function json_build_object.
-var json_build_object = framework.Function1{
+var json_build_object = framework.Function1N{
 	Name:       "json_build_object",
 	Return:     pgtypes.Json,
-	Parameters: [1]*pgtypes.DoltgresType{pgtypes.AnyArray},
-	Variadic:   true,
+	Parameters: [1]*pgtypes.DoltgresType{pgtypes.Any},
 	Callable:   json_build_object_callable,
 }
 
-func json_build_object_callable(ctx *sql.Context, argTypes [2]*pgtypes.DoltgresType, val1 any) (any, error) {
-	json, err := buildJsonObject(ctx, "json_build_object", argTypes, val1)
+func json_build_object_callable(ctx *sql.Context, argTypes []*pgtypes.DoltgresType, val1 any, vals []any) (any, error) {
+	json, err := buildJsonObject(ctx, "json_build_object", argTypes, append([]any{val1}, vals...))
 	if err != nil {
 		return nil, err
 	}
@@ -271,8 +269,7 @@ func json_build_object_callable(ctx *sql.Context, argTypes [2]*pgtypes.DoltgresT
 }
 
 // buildJsonObject constructs a json object from the input array provided, which are alternating keys and values.
-func buildJsonObject(ctx *sql.Context, fnName string, _ [2]*pgtypes.DoltgresType, val1 any) (types.JSONDocument, error) {
-	inputArray := val1.([]any)
+func buildJsonObject(ctx *sql.Context, fnName string, _ []*pgtypes.DoltgresType, inputArray []any) (types.JSONDocument, error) {
 	if len(inputArray)%2 != 0 {
 		return types.JSONDocument{}, sql.ErrInvalidArgumentNumber.New(fnName, "even number of arguments", len(inputArray))
 	}

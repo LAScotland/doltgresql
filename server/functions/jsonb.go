@@ -125,20 +125,18 @@ var jsonb_cmp = framework.Function2{
 }
 
 // jsonb_build_array represents the PostgreSQL function jsonb_build_array.
-var jsonb_build_array = framework.Function1{
+var jsonb_build_array = framework.Function1N{
 	Name:       "jsonb_build_array",
 	Return:     pgtypes.JsonB,
-	Parameters: [1]*pgtypes.DoltgresType{pgtypes.AnyArray},
-	Variadic:   true,
+	Parameters: [1]*pgtypes.DoltgresType{pgtypes.Any},
 	Callable:   json_build_array_callable,
 }
 
 // jsonb_build_object represents the PostgreSQL function jsonb_build_object.
-var jsonb_build_object = framework.Function1{
+var jsonb_build_object = framework.Function1N{
 	Name:       "jsonb_build_object",
 	Return:     pgtypes.JsonB,
-	Parameters: [1]*pgtypes.DoltgresType{pgtypes.AnyArray},
-	Variadic:   true,
+	Parameters: [1]*pgtypes.DoltgresType{pgtypes.Any},
 	Callable:   json_build_object_callable,
 }
 
