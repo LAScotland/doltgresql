@@ -480,6 +480,122 @@ func TestCreateTable(t *testing.T) {
 func TestCreateTableInherit(t *testing.T) {
 	RunScripts(t, []ScriptTest{
 		{
+			Name: "PostgreSQL inheritance does not copy parent keys or indexes",
+			SetUpScript: []string{
+				"create table inherit_parent (id serial primary key, required int not null default 7, u int unique check (u >= 0));",
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:    "create table inherit_child (primary key (id)) inherits (inherit_parent);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "insert into inherit_child (id, u) values (1, 10);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:       "insert into inherit_child (id, u) values (1, 10);",
+					ExpectedErr: "duplicate primary key given",
+				},
+				{
+					Query:    "select id, required, u from inherit_child;",
+					Expected: []sql.Row{{1, 7, 10}},
+				},
+				{
+					Query:    "select column_name from information_schema.columns where table_name = 'inherit_child' order by ordinal_position;",
+					Expected: []sql.Row{{"id"}, {"required"}, {"u"}},
+				},
+				{
+					Query:    "create table inherit_plain () inherits (inherit_parent);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "insert into inherit_plain (id, u) values (1, 10), (1, 10);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "select id, required, u from inherit_plain order by id;",
+					Expected: []sql.Row{{1, 7, 10}, {1, 7, 10}},
+				},
+				{
+					Query:       "insert into inherit_plain (id, required) values (2, null);",
+					ExpectedErr: "non-nullable but attempted to set a value of null",
+				},
+				{
+					Query:       "insert into inherit_plain (id, u) values (2, -1);",
+					ExpectedErr: "Check constraint",
+				},
+				{
+					Query:    "select count(*) from pg_constraint where conrelid = 'inherit_plain'::regclass and contype in ('p', 'u');",
+					Expected: []sql.Row{{int64(0)}},
+				},
+			},
+		},
+		{
+			Name: "Inherited child primary key keeps its declared composite order",
+			SetUpScript: []string{
+				"create table composite_parent (a int not null, b int not null);",
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:       "create table invalid_child (primary key (missing)) inherits (composite_parent);",
+					ExpectedErr: "key column 'missing' doesn't exist in table",
+				},
+				{
+					Query:       "create table unsupported_child (unique (a)) inherits (composite_parent);",
+					ExpectedErr: "UNIQUE constraints on an inherited child are not yet supported",
+				},
+				{
+					Query:    "create table composite_child (primary key (b, a)) inherits (composite_parent);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "select pg_get_constraintdef(oid) from pg_constraint where conrelid = 'composite_child'::regclass and contype = 'p';",
+					Expected: []sql.Row{{"PRIMARY KEY (b, a)"}},
+				},
+			},
+		},
+		{
+			Name: "Inherited child primary key preserves quoted identifier case",
+			SetUpScript: []string{
+				`create table quoted_parent ("CaseID" int not null);`,
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:    `create table quoted_child (primary key ("CaseID")) inherits (quoted_parent);`,
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    `insert into quoted_child ("CaseID") values (1);`,
+					Expected: []sql.Row{},
+				},
+				{
+					Query:       `insert into quoted_child ("CaseID") values (1);`,
+					ExpectedErr: "duplicate primary key given",
+				},
+			},
+		},
+		{
+			Name: "CREATE TABLE LIKE retains existing key copying behaviour",
+			SetUpScript: []string{
+				"create table like_parent (id int primary key, u int unique);",
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:    "create table like_child (like like_parent);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "insert into like_child values (1, 10);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:       "insert into like_child values (1, 11);",
+					ExpectedErr: "duplicate primary key given",
+				},
+			},
+		},
+		{
 			Name: "Create table with inheritance",
 			SetUpScript: []string{
 				"create table t1 (a int);",

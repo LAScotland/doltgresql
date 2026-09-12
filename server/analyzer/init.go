@@ -57,12 +57,14 @@ const (
 	ruleId_TypeSanitizeExistsSubquery                                    // typeSanitizeExistsSubquery
 	ruleId_ResolveTableForDDL                                            // resolveTableForDDL
 	ruleId_AddLikePrefixRanges                                           // addLikePrefixRanges
+	ruleId_NormalizeCreateTableInherits                                  // normalizeCreateTableInherits
 )
 
 // Init adds additional rules to the analyzer to handle Doltgres-specific functionality.
 func Init() {
 	// OnceBeforeDefault runs before AlwaysBeforeDefault in GMS
 	analyzer.OnceBeforeDefault = append([]analyzer.Rule{
+		{Id: ruleId_NormalizeCreateTableInherits, Apply: normalizeCreateTableInherits},
 		{Id: ruleId_ResolveType, Apply: ResolveType}, // ResolveType rule must run before simplifyFilters rule in GMS
 		{Id: ruleId_AddLikePrefixRanges, Apply: AddLikePrefixRanges},
 		{Id: ruleId_ApplyTablesForAnalyzeAllTables, Apply: applyTablesForAnalyzeAllTables},
