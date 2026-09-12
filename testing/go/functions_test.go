@@ -2208,6 +2208,9 @@ func TestJsonFunctions(t *testing.T) {
 		},
 		{
 			Name: "json_build_object",
+			SetUpScript: []string{
+				`CREATE DOMAIN json_key_scalar AS integer;`,
+			},
 			Assertions: []ScriptTestAssertion{
 				{
 					Query:            `SELECT json_build_object('a', 2, 'b', 4);`,
@@ -2233,6 +2236,11 @@ func TestJsonFunctions(t *testing.T) {
 					ExpectedColNames: []string{"json_build_object"},
 					Expected:         []sql.Row{{`{"array":[3,4],"json":[5],"null":null,"number":1,"text":"two"}`}},
 				},
+				{Query: `SELECT json_build_object(true, 1, 'name'::text, 2, 12::json_key_scalar, 3);`, Expected: []sql.Row{{`{"12":3,"name":2,"true":1}`}}},
+				{Query: `SELECT json_build_object('x', 1, NULL, 2);`, ExpectedErr: "argument 3: key must not be null"},
+				{Query: `SELECT json_build_object(ARRAY[1,2], 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
+				{Query: `SELECT json_build_object(ROW(1,2), 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
+				{Query: `SELECT json_build_object('"a"'::json, 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
 			},
 		},
 		{
@@ -2290,6 +2298,13 @@ func TestJsonFunctions(t *testing.T) {
 		},
 		{
 			Name: "jsonb_build_object",
+			SetUpScript: []string{
+				`CREATE DOMAIN jsonb_key_array AS integer[];`,
+				`CREATE DOMAIN jsonb_key_json AS jsonb;`,
+				`CREATE DOMAIN jsonb_key_scalar AS integer;`,
+				`CREATE TABLE jsonb_key_values (id int PRIMARY KEY, key_text text, key_number int);`,
+				`INSERT INTO jsonb_key_values VALUES (1, 'stored', 12);`,
+			},
 			Assertions: []ScriptTestAssertion{
 				{
 					Query:            `SELECT jsonb_build_object('a', 2, 'b', 4);`,
@@ -2314,6 +2329,15 @@ func TestJsonFunctions(t *testing.T) {
 					Query:    `SELECT COALESCE(NULL::jsonb, jsonb_build_object('en_US', jsonb_path_query_first('{"fr_FR":"Euros"}'::jsonb, '$.*'))) || '{"fr_FR":"Euros"}'::jsonb;`,
 					Expected: []sql.Row{{`{"en_US": "Euros", "fr_FR": "Euros"}`}},
 				},
+				{Query: `SELECT jsonb_build_object(true, 1, 'name'::text, 2, 12::jsonb_key_scalar, 3);`, Expected: []sql.Row{{`{"12": 3, "name": 2, "true": 1}`}}},
+				{Query: `SELECT jsonb_build_object(key_text, 1, key_number, 2) FROM jsonb_key_values WHERE id = 1;`, Expected: []sql.Row{{`{"12": 2, "stored": 1}`}}},
+				{Query: `SELECT jsonb_build_object('a', 1, 'a', 2);`, Expected: []sql.Row{{`{"a": 2}`}}},
+				{Query: `SELECT jsonb_build_object('x', 1, NULL, 2);`, ExpectedErr: "argument 3: key must not be null"},
+				{Query: `SELECT jsonb_build_object(ARRAY[1,2], 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
+				{Query: `SELECT jsonb_build_object(ARRAY[1,2]::jsonb_key_array, 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
+				{Query: `SELECT jsonb_build_object(ROW(1,2), 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
+				{Query: `SELECT jsonb_build_object('"a"'::jsonb, 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
+				{Query: `SELECT jsonb_build_object('1'::jsonb_key_json, 1);`, ExpectedErr: "key value must be scalar, not array, composite, or json"},
 			},
 		},
 		{

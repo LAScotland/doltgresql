@@ -23,6 +23,8 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/types"
 	"github.com/goccy/go-json"
 
+	"github.com/dolthub/doltgresql/postgres/parser/pgcode"
+	"github.com/dolthub/doltgresql/postgres/parser/pgerror"
 	"github.com/dolthub/doltgresql/server/functions/framework"
 	pgtypes "github.com/dolthub/doltgresql/server/types"
 	"github.com/dolthub/doltgresql/utils"
@@ -269,7 +271,7 @@ func json_build_object_callable(ctx *sql.Context, argTypes []*pgtypes.DoltgresTy
 }
 
 // buildJsonObject constructs a json object from the input array provided, which are alternating keys and values.
-func buildJsonObject(ctx *sql.Context, fnName string, _ []*pgtypes.DoltgresType, inputArray []any) (types.JSONDocument, error) {
+func buildJsonObject(ctx *sql.Context, fnName string, argTypes []*pgtypes.DoltgresType, inputArray []any) (types.JSONDocument, error) {
 	if len(inputArray)%2 != 0 {
 		return types.JSONDocument{}, sql.ErrInvalidArgumentNumber.New(fnName, "even number of arguments", len(inputArray))
 	}
@@ -277,6 +279,22 @@ func buildJsonObject(ctx *sql.Context, fnName string, _ []*pgtypes.DoltgresType,
 	var key string
 	for i, e := range inputArray {
 		if i%2 == 0 {
+			if e == nil {
+				return types.JSONDocument{}, pgerror.WithCandidateCode(
+					errors.Errorf("argument %d: key must not be null", i+1),
+					pgcode.InvalidParameterValue,
+				)
+			}
+			keyType := argTypes[i]
+			if keyType.TypType == pgtypes.TypeType_Domain {
+				keyType = keyType.DomainUnderlyingBaseType()
+			}
+			if keyType.IsArrayType() || keyType.IsCompositeType() || keyType.ID == pgtypes.Json.ID || keyType.ID == pgtypes.JsonB.ID {
+				return types.JSONDocument{}, pgerror.WithCandidateCode(
+					errors.New("key value must be scalar, not array, composite, or json"),
+					pgcode.InvalidParameterValue,
+				)
+			}
 			var ok bool
 			var err error
 			key, ok, err = sql.Unwrap[string](ctx, e)
@@ -284,9 +302,9 @@ func buildJsonObject(ctx *sql.Context, fnName string, _ []*pgtypes.DoltgresType,
 				return types.JSONDocument{}, err
 			}
 			if !ok {
-				// TODO: This isn't correct for every type we might use as a value. To get better type info to transform
-				//  every value into its string format, we need to pass detailed arg type info for the vararg params (the
-				//  unused param in the function call).
+				// TODO: Render scalar keys through PostgreSQL type output while preserving
+				// JSON's boolean spelling. fmt.Sprintf is not correct for every scalar
+				// type, including date, bytea, and some user-defined types.
 				key = fmt.Sprintf("%v", e)
 			}
 		} else {
