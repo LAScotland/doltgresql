@@ -1238,6 +1238,50 @@ func TestJsonObjectKeys(t *testing.T) {
 	})
 }
 
+func TestJsonbEachText(t *testing.T) {
+	RunScripts(t, []ScriptTest{
+		{
+			Name: "jsonb_each_text values and errors",
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:            `SELECT key, value FROM jsonb_each_text('{"s":"text","n":null,"a":[1,2],"o":{"x":1},"b":true,"i":42}'::jsonb) ORDER BY key;`,
+					Expected:         []sql.Row{{"a", "[1, 2]"}, {"b", "true"}, {"i", "42"}, {"n", nil}, {"o", `{"x": 1}`}, {"s", "text"}},
+					ExpectedColNames: []string{"key", "value"},
+				},
+				{Query: `SELECT * FROM jsonb_each_text('{}'::jsonb);`, Expected: []sql.Row{}},
+				{Query: `SELECT * FROM jsonb_each_text(NULL::jsonb);`, Expected: []sql.Row{}},
+				{
+					Query:           `SELECT * FROM jsonb_each_text('[1,2]'::jsonb);`,
+					ExpectedErr:     "cannot call jsonb_each_text on a non-object",
+					ExpectedErrCode: "22023",
+				},
+				{
+					Query:           `SELECT * FROM jsonb_each_text('42'::jsonb);`,
+					ExpectedErr:     "cannot call jsonb_each_text on a non-object",
+					ExpectedErrCode: "22023",
+				},
+			},
+		},
+		{
+			Name: "jsonb_each_text aliases and lateral correlation",
+			SetUpScript: []string{
+				`CREATE TABLE jsonb_each_text_docs (id int PRIMARY KEY, attrs jsonb);`,
+				`INSERT INTO jsonb_each_text_docs VALUES (1, '{"company_dependent":"yes","nested":{"x":2}}'), (2, '{}'), (3, NULL);`,
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:    `SELECT d.id, e.k, e.v FROM jsonb_each_text_docs AS d CROSS JOIN LATERAL jsonb_each_text(d.attrs) AS e(k, v) ORDER BY d.id, e.k;`,
+					Expected: []sql.Row{{1, "company_dependent", "yes"}, {1, "nested", `{"x": 2}`}},
+				},
+				{
+					Query:    `SELECT d.id, e.value FROM jsonb_each_text_docs AS d, jsonb_each_text(d.attrs) AS e WHERE e.key = 'company_dependent';`,
+					Expected: []sql.Row{{1, "yes"}},
+				},
+			},
+		},
+	})
+}
+
 func TestJsonbPathQueryFirstCompatibility(t *testing.T) {
 	RunScripts(t, []ScriptTest{
 		{
