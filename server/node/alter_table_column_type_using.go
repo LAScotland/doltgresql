@@ -37,13 +37,14 @@ import (
 // plain column type change (which converts the existing values directly to the new type), the USING form computes each
 // row's new value by evaluating the given expression against the old row.
 type AlterTableColumnTypeUsing struct {
-	DbProvider sql.DatabaseProvider
-	NewType    *pgtypes.DoltgresType
-	SchemaName string
-	TableName  string
-	ColumnName string
-	IfExists   bool
-	usingExpr  sql.Expression
+	DbProvider  sql.DatabaseProvider
+	NewType     *pgtypes.DoltgresType
+	SchemaName  string
+	TableName   string
+	ColumnName  string
+	IfExists    bool
+	DropDefault bool
+	usingExpr   sql.Expression
 	// table is the resolved target table, assigned during analysis by the resolveTableForDDL rule. It is nil when
 	// the table does not exist, which analysis only tolerates when IfExists is set; execution is then a no-op.
 	table sql.TableNode
@@ -56,13 +57,14 @@ var _ vitess.Injectable = (*AlterTableColumnTypeUsing)(nil)
 
 // NewAlterTableColumnTypeUsing returns a new *AlterTableColumnTypeUsing. The USING expression is provided through
 // WithResolvedChildren as the single injected child.
-func NewAlterTableColumnTypeUsing(schemaName, tableName, columnName string, newType *pgtypes.DoltgresType, ifExists bool) *AlterTableColumnTypeUsing {
+func NewAlterTableColumnTypeUsing(schemaName, tableName, columnName string, newType *pgtypes.DoltgresType, ifExists bool, dropDefault bool) *AlterTableColumnTypeUsing {
 	return &AlterTableColumnTypeUsing{
-		NewType:    newType,
-		SchemaName: schemaName,
-		TableName:  tableName,
-		ColumnName: columnName,
-		IfExists:   ifExists,
+		NewType:     newType,
+		SchemaName:  schemaName,
+		TableName:   tableName,
+		ColumnName:  columnName,
+		IfExists:    ifExists,
+		DropDefault: dropDefault,
 	}
 }
 
@@ -163,8 +165,11 @@ func (a *AlterTableColumnTypeUsing) RowIter(ctx *sql.Context, r sql.Row) (sql.Ro
 		return nil, sql.ErrTableColumnNotFound.New(a.TableName, a.ColumnName)
 	}
 	oldCol := sch[colIdx]
-	newCol := *oldCol
+	newCol := oldCol.Copy()
 	newCol.Type = a.NewType
+	if a.DropDefault {
+		newCol.Default = nil
+	}
 
 	// Reject type changes for columns that participate in a foreign key, mirroring the behavior of the
 	// non-USING column type change.
@@ -195,12 +200,12 @@ func (a *AlterTableColumnTypeUsing) RowIter(ctx *sql.Context, r sql.Row) (sql.Ro
 
 	newSch := make(sql.Schema, len(sch))
 	copy(newSch, sch)
-	newSch[colIdx] = &newCol
+	newSch[colIdx] = newCol
 
 	oldPkSchema := sql.SchemaToPrimaryKeySchema(ctx, rwt, sch)
 	newPkSchema := sql.SchemaToPrimaryKeySchema(ctx, rwt, newSch)
 
-	if err := a.rewriteRows(ctx, rwt, oldPkSchema, newPkSchema, oldCol, &newCol, conversionExpr, usingTypeOk, colIdx); err != nil {
+	if err := a.rewriteRows(ctx, rwt, oldPkSchema, newPkSchema, oldCol, newCol, conversionExpr, usingTypeOk, colIdx); err != nil {
 		return nil, err
 	}
 	return sql.RowsToRowIter(), nil

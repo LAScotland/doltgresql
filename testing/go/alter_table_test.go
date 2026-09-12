@@ -675,6 +675,84 @@ func TestAlterTable(t *testing.T) {
 			},
 		},
 		{
+			Name: "Odoo DROP DEFAULT and TYPE USING pair",
+			SetUpScript: []string{
+				"CREATE TABLE t1 (id INT PRIMARY KEY, value TEXT DEFAULT '7');",
+				"INSERT INTO t1 VALUES (1, '10'), (2, '20');",
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE IF EXISTS missing_table ALTER COLUMN value DROP DEFAULT, ALTER COLUMN value TYPE integer USING value::integer;",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "ALTER TABLE t1 ALTER COLUMN value DROP DEFAULT, ALTER COLUMN value TYPE integer USING value::integer;",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "SELECT id, value, pg_typeof(value) FROM t1 ORDER BY id;",
+					Expected: []sql.Row{{1, 10, "integer"}, {2, 20, "integer"}},
+				},
+				{
+					Query:    "SELECT column_default IS NULL FROM information_schema.columns WHERE table_name = 't1' AND column_name = 'value';",
+					Expected: []sql.Row{{"t"}},
+				},
+				{
+					Query:    "INSERT INTO t1 (id) VALUES (3);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "SELECT value FROM t1 WHERE id = 3;",
+					Expected: []sql.Row{{nil}},
+				},
+			},
+		},
+		{
+			Name: "failed Odoo column conversion preserves type rows and default",
+			SetUpScript: []string{
+				"CREATE TABLE t1 (id INT PRIMARY KEY, value TEXT DEFAULT '7');",
+				"INSERT INTO t1 VALUES (1, '10'), (2, 'not-a-number');",
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:       "ALTER TABLE t1 ALTER COLUMN value DROP DEFAULT, ALTER COLUMN value TYPE integer USING value::integer;",
+					ExpectedErr: "invalid input syntax for type",
+				},
+				{
+					Query:    "SELECT id, value, pg_typeof(value) FROM t1 ORDER BY id;",
+					Expected: []sql.Row{{1, "10", "text"}, {2, "not-a-number", "text"}},
+				},
+				{
+					Query:    "INSERT INTO t1 (id) VALUES (3);",
+					Expected: []sql.Row{},
+				},
+				{
+					Query:    "SELECT value FROM t1 WHERE id = 3;",
+					Expected: []sql.Row{{"7"}},
+				},
+			},
+		},
+		{
+			Name: "unsupported multi-action TYPE USING combinations remain rejected",
+			SetUpScript: []string{
+				"CREATE TABLE t1 (id INT PRIMARY KEY, value TEXT DEFAULT '7', other TEXT DEFAULT '8');",
+			},
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:       "ALTER TABLE t1 ALTER COLUMN other DROP DEFAULT, ALTER COLUMN value TYPE integer USING value::integer;",
+					ExpectedErr: "multi-action",
+				},
+				{
+					Query:       "ALTER TABLE t1 ALTER COLUMN value TYPE integer USING value::integer, ALTER COLUMN value DROP DEFAULT;",
+					ExpectedErr: "multi-action",
+				},
+				{
+					Query:       "ALTER TABLE t1 ALTER COLUMN value DROP DEFAULT, ALTER COLUMN value TYPE integer USING value::integer, ALTER COLUMN other DROP DEFAULT;",
+					ExpectedErr: "multi-action",
+				},
+			},
+		},
+		{
 			Name: "Alter Column Type with USING failure leaves the table intact",
 			SetUpScript: []string{
 				"CREATE TABLE t1 (id INT PRIMARY KEY, value TEXT);",

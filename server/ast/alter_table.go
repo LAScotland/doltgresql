@@ -56,8 +56,11 @@ func nodeAlterTable(ctx *Context, node *tree.AlterTable) (vitess.Statement, erro
 			}, nil
 		}
 		if tcmd, ok := node.Cmds[0].(*tree.AlterTableAlterColumnType); ok && tcmd.Using != nil {
-			return nodeAlterTableAlterColumnTypeUsing(ctx, tcmd, tableName, node.IfExists)
+			return nodeAlterTableAlterColumnTypeUsing(ctx, tcmd, tableName, node.IfExists, false)
 		}
+	}
+	if tcmd, ok := alterColumnDropDefaultTypeUsingPair(node.Cmds); ok {
+		return nodeAlterTableAlterColumnTypeUsing(ctx, tcmd, tableName, node.IfExists, true)
 	}
 	statements, noOps, err := nodeAlterTableCmds(ctx, node.Cmds, tableName, node.IfExists)
 	if err != nil {
@@ -81,6 +84,25 @@ func nodeAlterTable(ctx *Context, node *tree.AlterTable) (vitess.Statement, erro
 		Table:      tableName,
 		Statements: statements,
 	}, nil
+}
+
+// alterColumnDropDefaultTypeUsingPair recognises the two-action form emitted by
+// Odoo when converting a column. The DROP DEFAULT must precede the TYPE action,
+// and both actions must name the same column; every other multi-action USING
+// statement continues through the existing unsupported-command path.
+func alterColumnDropDefaultTypeUsingPair(cmds tree.AlterTableCmds) (*tree.AlterTableAlterColumnType, bool) {
+	if len(cmds) != 2 {
+		return nil, false
+	}
+	dropDefault, ok := cmds[0].(*tree.AlterTableSetDefault)
+	if !ok || dropDefault.Default != nil {
+		return nil, false
+	}
+	typeUsing, ok := cmds[1].(*tree.AlterTableAlterColumnType)
+	if !ok || typeUsing.Using == nil || dropDefault.Column != typeUsing.Column {
+		return nil, false
+	}
+	return typeUsing, true
 }
 
 // nodeAlterTableSetSchema handles *tree.AlterTableSetSchema nodes.
@@ -389,7 +411,7 @@ func nodeAlterTableAlterColumnType(ctx *Context, node *tree.AlterTableAlterColum
 // nodeAlterTableAlterColumnTypeUsing converts a tree.AlterTableAlterColumnType instance that includes a USING clause
 // into a vitess.InjectedStatement wrapping a pgnodes.AlterTableColumnTypeUsing node. The USING form computes each
 // row's new value by evaluating the given expression, rather than converting the existing values directly.
-func nodeAlterTableAlterColumnTypeUsing(ctx *Context, node *tree.AlterTableAlterColumnType, tableName vitess.TableName, ifExists bool) (vitess.Statement, error) {
+func nodeAlterTableAlterColumnTypeUsing(ctx *Context, node *tree.AlterTableAlterColumnType, tableName vitess.TableName, ifExists bool, dropDefault bool) (vitess.Statement, error) {
 	if node.Collation != "" {
 		return nil, errors.Errorf("ALTER TABLE with COLLATE is not supported yet")
 	}
@@ -445,6 +467,7 @@ func nodeAlterTableAlterColumnTypeUsing(ctx *Context, node *tree.AlterTableAlter
 			bareIdentifier(node.Column),
 			resolvedType,
 			ifExists,
+			dropDefault,
 		),
 		Children: vitess.Exprs{usingExpr},
 	}, nil
