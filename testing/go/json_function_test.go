@@ -1310,6 +1310,41 @@ func TestJsonbPathQueryFirstCompatibility(t *testing.T) {
 	})
 }
 
+func TestJsonbPathQueryArrayCompatibility(t *testing.T) {
+	RunScripts(t, []ScriptTest{
+		{
+			Name: "root and SQL NULL behavior",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_array('[1,2]'::jsonb, '$');`, Expected: []sql.Row{{`[[1, 2]]`}}},
+				{Query: `SELECT jsonb_path_query_array('null'::jsonb, '$');`, Expected: []sql.Row{{`[null]`}}},
+				{Query: `SELECT jsonb_path_query_array(NULL::jsonb, '$') IS NULL;`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT jsonb_path_query_array('{}'::jsonb, '$.*');`, Expected: []sql.Row{{`[]`}}},
+			},
+		},
+		{
+			Name: "all object members use JSONB key order",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_array('{"aa":1,"z":2,"b":null}'::jsonb, '$.*');`, Expected: []sql.Row{{`[null, 2, 1]`}}},
+				{Query: `SELECT jsonb_path_query_array('[{"b":2,"a":1},9,{},null,{"z":3}]'::jsonb, 'lax $.*');`, Expected: []sql.Row{{`[1, 2, 3]`}}},
+				{Query: `SELECT jsonb_path_query_array('[1,2]'::jsonb, '$.*');`, Expected: []sql.Row{{`[]`}}},
+			},
+		},
+		{
+			Name: "Odoo translation search expression",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_array('{"fr_FR":"Euros","en_US":"Euro"}'::jsonb, '$.*')::text;`, Expected: []sql.Row{{`["Euro", "Euros"]`}}},
+			},
+		},
+		{
+			Name: "strict and unsupported paths report explicit errors",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_array('[{"a":1}]'::jsonb, 'strict $.*');`, ExpectedErr: "wildcard member accessor can only be applied to an object", ExpectedErrCode: "2203C"},
+				{Query: `SELECT jsonb_path_query_array('{"a":1}'::jsonb, '$.a');`, ExpectedErr: "jsonb_path_query_array compatibility overload does not support path"},
+			},
+		},
+	})
+}
+
 // TestJsonStripNulls exercises json_strip_nulls and jsonb_strip_nulls, which
 // recursively drop object fields whose value is JSON null.
 func TestJsonStripNulls(t *testing.T) {

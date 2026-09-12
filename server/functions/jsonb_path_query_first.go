@@ -72,6 +72,10 @@ const (
 )
 
 func parseSupportedJsonPath(input string) (jsonPathMode, string, error) {
+	return parseSupportedJsonPathFor("jsonb_path_query_first", input)
+}
+
+func parseSupportedJsonPathFor(functionName, input string) (jsonPathMode, string, error) {
 	path := strings.TrimSpace(input)
 	mode := jsonPathLax
 	if rest, ok := strings.CutPrefix(path, "lax "); ok {
@@ -82,7 +86,7 @@ func parseSupportedJsonPath(input string) (jsonPathMode, string, error) {
 	}
 	if path != "$" && path != "$.*" {
 		return mode, "", pgerror.WithCandidateCode(
-			errors.Errorf("jsonb_path_query_first compatibility overload does not support path %q", input),
+			errors.Errorf("%s compatibility overload does not support path %q", functionName, input),
 			pgcode.FeatureNotSupported,
 		)
 	}
