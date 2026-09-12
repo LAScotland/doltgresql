@@ -26,6 +26,11 @@ func TestJsonbObjectAgg(t *testing.T) {
 		SetUpScript: []string{
 			`CREATE TABLE object_agg_values (ord int4 primary key, k text, v int4, payload jsonb);`,
 			`INSERT INTO object_agg_values VALUES (1,'a',1,'{"nested":true}'), (2,'b',NULL,'null'), (3,'a',3,'[1,2]');`,
+			`CREATE TABLE object_agg_cleanup (id int4 primary key, company_value jsonb);`,
+			`INSERT INTO object_agg_cleanup VALUES (1,'{"1":12,"2":34,"3":56}');`,
+			`CREATE TABLE object_agg_large (id int4 primary key, payload jsonb);`,
+			`INSERT INTO object_agg_large SELECT 1, jsonb_object_agg('integer',56::int4);`,
+			`INSERT INTO object_agg_large SELECT 2, jsonb_object_agg('nested','{"x":1}'::jsonb);`,
 		},
 		Assertions: []ScriptTestAssertion{
 			{Query: `SELECT jsonb_object_agg(k, v) FROM object_agg_values;`, Expected: []sql.Row{{`{"a": 3, "b": null}`}}},
@@ -41,12 +46,19 @@ func TestJsonbObjectAgg(t *testing.T) {
 			{Query: `SELECT jsonb_object_agg(k, 1) FROM (VALUES ('"a"'::jsonb)) AS x(k);`, ExpectedErr: `key value must be scalar, not array, composite, or json`},
 			{Query: `SELECT jsonb_object_agg(k, v) FROM (VALUES (2::numeric,'two'::text),(10::numeric,'ten'::text)) AS x(k,v);`, Expected: []sql.Row{{`{"2": "two", "10": "ten"}`}}},
 			{Query: `SELECT jsonb_object_agg(k, v) FROM (VALUES ('numeric'::text,123.45::numeric)) AS x(k,v);`, Expected: []sql.Row{{`{"numeric": 123.45}`}}},
+			{Query: `SELECT jsonb_object_agg('numeric', 123.450::numeric);`, Expected: []sql.Row{{`{"numeric": 123.45}`}}},
+			{Query: `SELECT jsonb_object_agg('numeric', 12345678901234567890.123456789::numeric);`, ExpectedErr: `cannot preserve numeric value`},
 			{Query: `SELECT jsonb_object_agg('literal', 7);`, Expected: []sql.Row{{`{"literal": 7}`}}},
 			{Query: `SELECT g, jsonb_object_agg(k,v) FROM (VALUES ('x','a',1),('x','b',2),('y','c',3)) AS x(g,k,v) GROUP BY g ORDER BY g;`, Expected: []sql.Row{{"x", `{"a": 1, "b": 2}`}, {"y", `{"c": 3}`}}},
 			{Query: `SELECT jsonb_object_agg(k,v) OVER (ORDER BY ord ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) FROM (VALUES (1,'a',1),(2,'b',2)) AS x(ord,k,v) ORDER BY ord;`, Expected: []sql.Row{{nil}, {`{"a": 1}`}}},
 			{Query: `SELECT (jsonb_object_agg(k,v) ->> 'a') FROM object_agg_values;`, Expected: []sql.Row{{"3"}}},
 			{Query: `SELECT e.key, e.value FROM (SELECT jsonb_object_agg(k,v) AS obj FROM object_agg_values) a CROSS JOIN LATERAL jsonb_each_text(a.obj) e ORDER BY e.key;`, Expected: []sql.Row{{"a", "3"}, {"b", nil}}},
 			{Query: `SELECT jsonb_object_agg(k,v) @? '$.* ? (@ == 3)' FROM object_agg_values;`, Expected: []sql.Row{{"t"}}},
+			{Query: `SELECT jsonb_object_agg(key, CASE WHEN value::int4 IN (12,34) THEN NULL ELSE value::int4 END) FROM jsonb_each_text('{"1":12,"2":34,"3":56}'::jsonb);`, Expected: []sql.Row{{`{"1": null, "2": null, "3": 56}`}}},
+			{Query: `UPDATE object_agg_cleanup SET company_value = (SELECT jsonb_object_agg(key, CASE WHEN value::int4 IN (12,34) THEN NULL ELSE value::int4 END) FROM jsonb_each_text(company_value));`, Expected: []sql.Row{}},
+			{Query: `SELECT company_value FROM object_agg_cleanup;`, Expected: []sql.Row{{`{"1": null, "2": null, "3": 56}`}}},
+			{Query: `SELECT payload FROM object_agg_large ORDER BY id;`, Expected: []sql.Row{{`{"integer": 56}`}, {`{"nested": {"x": 1}}`}}},
+			{Query: `SELECT jsonb_object_agg('n',9007199254740993::numeric) @? '$.* ? (@ == 9007199254740993)';`, Expected: []sql.Row{{"t"}}},
 		},
 	}})
 }

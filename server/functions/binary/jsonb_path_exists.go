@@ -279,6 +279,12 @@ func jsonNumberDecimal(value any) (*apd.Decimal, bool) {
 		// point noise before the exact decimal comparison below.
 		d, _, err := apd.NewFromString(strconv.FormatFloat(v, 'g', -1, 64))
 		return d, err == nil
+	case int64:
+		d, _, err := apd.NewFromString(strconv.FormatInt(v, 10))
+		return d, err == nil
+	case uint64:
+		d, _, err := apd.NewFromString(strconv.FormatUint(v, 10))
+		return d, err == nil
 	default:
 		return nil, false
 	}

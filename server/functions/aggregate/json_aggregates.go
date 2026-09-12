@@ -15,6 +15,7 @@
 package aggregate
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/apd/v3"
@@ -252,34 +253,63 @@ func jsonbObjectAggValue(ctx *sql.Context, expr sql.Expression, value any) (any,
 	if err != nil {
 		return nil, err
 	}
-	return jsonbAggregateValueToInterface(document.Value), nil
+	return jsonbAggregateValueToInterface(document.Value)
 }
 
-func jsonbAggregateValueToInterface(value pgtypes.JsonValue) any {
+func jsonbAggregateValueToInterface(value pgtypes.JsonValue) (any, error) {
 	switch value := value.(type) {
 	case pgtypes.JsonValueObject:
 		result := make(map[string]any, len(value.Items))
 		for _, item := range value.Items {
-			result[item.Key] = jsonbAggregateValueToInterface(item.Value)
+			converted, err := jsonbAggregateValueToInterface(item.Value)
+			if err != nil {
+				return nil, err
+			}
+			result[item.Key] = converted
 		}
-		return result
+		return result, nil
 	case pgtypes.JsonValueArray:
 		result := make([]any, len(value))
 		for idx, item := range value {
-			result[idx] = jsonbAggregateValueToInterface(item)
+			converted, err := jsonbAggregateValueToInterface(item)
+			if err != nil {
+				return nil, err
+			}
+			result[idx] = converted
 		}
-		return result
+		return result, nil
 	case pgtypes.JsonValueString:
-		return string(value)
+		return string(value), nil
 	case pgtypes.JsonValueNumber:
 		decimal := apd.Decimal(value)
-		return &decimal
+		text := decimal.Text('f')
+		if integer, err := strconv.ParseInt(text, 10, 64); err == nil {
+			if integer > -(1<<53) && integer < 1<<53 {
+				return float64(integer), nil
+			}
+			return integer, nil
+		}
+		if unsigned, err := strconv.ParseUint(text, 10, 64); err == nil {
+			if unsigned < 1<<53 {
+				return float64(unsigned), nil
+			}
+			return unsigned, nil
+		}
+		floating, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return nil, errors.Errorf("jsonb_object_agg cannot preserve numeric value %s", text)
+		}
+		roundTrip, _, err := apd.NewFromString(strconv.FormatFloat(floating, 'g', -1, 64))
+		if err != nil || decimal.Cmp(roundTrip) != 0 {
+			return nil, errors.Errorf("jsonb_object_agg cannot preserve numeric value %s", text)
+		}
+		return floating, nil
 	case pgtypes.JsonValueBoolean:
-		return bool(value)
+		return bool(value), nil
 	case pgtypes.JsonValueNull:
-		return nil
+		return nil, nil
 	default:
-		return nil
+		return nil, errors.Errorf("jsonb_object_agg: unsupported JSON value %T", value)
 	}
 }
 
