@@ -15,6 +15,10 @@
 package hook
 
 import (
+	"context"
+	"fmt"
+	"io"
+
 	"github.com/cockroachdb/errors"
 	"github.com/dolthub/dolt/go/libraries/doltcore/doltdb"
 	"github.com/dolthub/go-mysql-server/sql"
@@ -24,6 +28,15 @@ import (
 	"github.com/dolthub/doltgresql/core/id"
 	pgtypes "github.com/dolthub/doltgresql/server/types"
 )
+
+type inheritedNotNullSnapshotKey struct{ node *plan.ModifyColumn }
+
+type inheritedNotNullSnapshot struct {
+	database string
+	root     doltdb.RootValue
+	table    doltdb.TableName
+	column   string
+}
 
 // beforeTableModifyColumnChange represents what properties of a column changed when a call is made to BeforeTableModifyColumn.
 type beforeTableModifyColumnChange uint8
@@ -63,20 +76,127 @@ func BeforeTableModifyColumn(ctx *sql.Context, runner sql.StatementRunner, nodeI
 		// If this table isn't a Dolt table then we don't have anything to do
 		return n, nil
 	}
-	action := "alter the nullability of"
 	if changed == beforeTableModifyColumnChange_Type {
-		action = "alter the type of"
-	}
-	if err := RejectInheritedColumnMutation(ctx, action, newColumn.Name, doltTable.TableName()); err != nil {
-		return nil, err
-	}
-	if changed == beforeTableModifyColumnChange_Nullability {
+		if err := RejectInheritedColumnMutation(ctx, "alter the type of", newColumn.Name, doltTable.TableName()); err != nil {
+			return nil, err
+		}
+		if err := ValidateColumnTypeChangeForTable(ctx, doltTable.TableName()); err != nil {
+			return nil, err
+		}
 		return n, nil
 	}
-	if err := ValidateColumnTypeChangeForTable(ctx, doltTable.TableName()); err != nil {
+	if isInheritancePropagation(ctx) {
+		return n, nil
+	}
+	if newColumn.Nullable {
+		if err := RejectInheritedColumnMutation(ctx, "drop NOT NULL from", newColumn.Name, doltTable.TableName()); err != nil {
+			return nil, err
+		}
+		return n, nil
+	}
+	if err := prepareInheritedSetNotNull(ctx, runner, n, doltTable.TableName(), newColumn.Name); err != nil {
 		return nil, err
 	}
 	return n, nil
+}
+
+func prepareInheritedSetNotNull(ctx *sql.Context, runner sql.StatementRunner, n *plan.ModifyColumn, tableName doltdb.TableName, columnName string) error {
+	collection, err := core.GetInheritanceCollectionFromContext(ctx, ctx.GetCurrentDatabase())
+	if err != nil {
+		return err
+	}
+	descendants := collection.Descendants(ctx, id.NewTable(tableName.Schema, tableName.Name))
+	if len(descendants) == 0 {
+		return nil
+	}
+	tables := make([]id.Table, 0, len(descendants)+1)
+	tables = append(tables, id.NewTable(tableName.Schema, tableName.Name))
+	tables = append(tables, descendants...)
+	for _, tableID := range tables {
+		hasNull, err := inheritedColumnHasNull(ctx, runner, tableID, columnName)
+		if err != nil {
+			return err
+		}
+		if hasNull {
+			return errors.Errorf("column %q of table %q contains null values", columnName, tableID.TableName())
+		}
+	}
+	_, root, err := core.GetRootFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	ctx.Context = context.WithValue(ctx.Context, inheritedNotNullSnapshotKey{node: n}, inheritedNotNullSnapshot{
+		database: ctx.GetCurrentDatabase(), root: root, table: tableName, column: columnName,
+	})
+	return nil
+}
+
+func inheritedColumnHasNull(ctx *sql.Context, runner sql.StatementRunner, table id.Table, columnName string) (bool, error) {
+	query := fmt.Sprintf("SELECT 1 FROM ONLY %s.%s WHERE %s IS NULL LIMIT 1",
+		quoteIdentifier(table.SchemaName()), quoteIdentifier(table.TableName()), quoteIdentifier(columnName))
+	rows, err := sql.RunInterpreted(ctx, func(subCtx *sql.Context) ([]sql.Row, error) {
+		_, iter, _, err := runner.QueryWithBindings(subCtx, query, nil, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer iter.Close(subCtx)
+		row, err := iter.Next(subCtx)
+		if err == io.EOF {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return []sql.Row{row}, nil
+	})
+	return len(rows) > 0, err
+}
+
+// AfterTableModifyColumn propagates a validated SET NOT NULL through descendants.
+func AfterTableModifyColumn(ctx *sql.Context, runner sql.StatementRunner, nodeInterface sql.Node) (retErr error) {
+	n, ok := nodeInterface.(*plan.ModifyColumn)
+	if !ok {
+		return errors.Errorf("MODIFY COLUMN post-hook expected `*plan.ModifyColumn` but received `%T`", nodeInterface)
+	}
+	if isInheritancePropagation(ctx) {
+		return nil
+	}
+	snapshot, ok := ctx.Value(inheritedNotNullSnapshotKey{node: n}).(inheritedNotNullSnapshot)
+	if !ok {
+		return nil
+	}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		session, _, rootErr := core.GetRootFromContext(ctx)
+		if rootErr == nil {
+			rootErr = session.SetWorkingRoot(ctx, snapshot.database, snapshot.root)
+		}
+		if rootErr != nil {
+			retErr = errors.WithSecondaryError(retErr, errors.Wrap(rootErr, "failed to restore inherited SET NOT NULL root"))
+		}
+	}()
+	collection, err := core.GetInheritanceCollectionFromContext(ctx, snapshot.database)
+	if err != nil {
+		return err
+	}
+	for _, descendant := range collection.Descendants(ctx, id.NewTable(snapshot.table.Schema, snapshot.table.Name)) {
+		statement := fmt.Sprintf("ALTER TABLE %s.%s ALTER COLUMN %s SET NOT NULL",
+			quoteIdentifier(descendant.SchemaName()), quoteIdentifier(descendant.TableName()), quoteIdentifier(snapshot.column))
+		_, err = sql.RunInterpreted(ctx, func(subCtx *sql.Context) ([]sql.Row, error) {
+			guardedCtx := subCtx.WithContext(context.WithValue(subCtx.Context, inheritancePropagationKey{}, true))
+			_, iter, _, err := runner.QueryWithBindings(guardedCtx, statement, nil, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			return sql.RowIterToRows(guardedCtx, iter)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ValidateColumnTypeChangeForTable returns an error if the given table's implicit row type is used as the type of a

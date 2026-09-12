@@ -35,13 +35,19 @@ all descendants for missing tables or name collisions. Supported types are int2,
 int4, int8, text, varchar (including length), jsonb and timestamp. Adding defaults,
 required columns, generated columns or a column position to a parent is rejected.
 A collision with a descendant's existing column is rejected, rather than merged.
+`SET NOT NULL` is supported on a parent or intermediate child and propagates to
+all of its descendants after every affected physical table has been checked for
+NULL values. A child may also strengthen an inherited nullable column. A failed
+preflight leaves every affected schema unchanged.
 
 Recursive UPDATE, DELETE and TRUNCATE are not implemented. The engine rejects
 these operations on parents with descendants. UPDATE ONLY, DELETE ONLY and
 TRUNCATE ONLY are also not implemented. Ordinary updates to a leaf table work.
 
-Table rename/drop and inherited-column rename/drop/type/nullability changes are guarded.
-A leaf's own additional columns can still be changed. Parent default and CHECK
+Table rename/drop and inherited-column rename/drop/type changes are guarded.
+`DROP NOT NULL` is rejected when a column participates in inheritance because
+column ownership is not yet stored. A leaf's own additional columns can still be
+changed, including its locally owned nullability. Parent default and CHECK
 changes are rejected. ALTER TABLE ONLY supports the existing physical
 primary/unique/foreign-key operations and guarded default changes; other forms
 are rejected. Temporary inheritance, cross-database inheritance and historical
