@@ -170,10 +170,11 @@ func initEngine() {
 // routes a call with an OVER(...) clause into the window-building path if IsWindowFunc recognizes its name,
 // and Postgres allows any aggregate to be used as a window function.
 var postgresOnlyAggregateFuncNames = map[string]bool{
-	"array_agg": true,
-	"bool_and":  true,
-	"bool_or":   true,
-	"json_agg":  true,
+	"array_agg":        true,
+	"bool_and":         true,
+	"bool_or":          true,
+	"json_agg":         true,
+	"jsonb_object_agg": true,
 }
 
 // postgresOnlyWindowFuncNames holds Postgres functions that may only be used as window functions (i.e.

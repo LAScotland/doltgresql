@@ -680,6 +680,23 @@ type Func1Aggregate struct {
 	NewAggWindowFunc NewWindowFunctionFn
 }
 
+// Func2Aggregate is a function that takes two parameters and is an aggregate function.
+type Func2Aggregate struct {
+	Function2
+	NewAggBuffer     func([]sql.Expression) (sql.AggregationBuffer, error)
+	NewAggWindowFunc NewWindowFunctionFn
+}
+
+var _ AggregateFunctionInterface = Func2Aggregate{}
+
+func (f Func2Aggregate) NewBuffer(exprs []sql.Expression) (sql.AggregationBuffer, error) {
+	return f.NewAggBuffer(exprs)
+}
+
+func (f Func2Aggregate) NewWindowFunc() NewWindowFunctionFn {
+	return f.NewAggWindowFunc
+}
+
 var _ AggregateFunctionInterface = Func1Aggregate{}
 
 func (f Func1Aggregate) NewBuffer(exprs []sql.Expression) (sql.AggregationBuffer, error) {

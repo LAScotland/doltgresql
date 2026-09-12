@@ -17,9 +17,13 @@ package aggregate
 import (
 	"strings"
 
+	"github.com/cockroachdb/apd/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/dolthub/go-mysql-server/sql"
+	gmstypes "github.com/dolthub/go-mysql-server/sql/types"
 
+	"github.com/dolthub/doltgresql/postgres/parser/pgcode"
+	"github.com/dolthub/doltgresql/postgres/parser/pgerror"
 	"github.com/dolthub/doltgresql/server/functions"
 	"github.com/dolthub/doltgresql/server/functions/framework"
 	pgtypes "github.com/dolthub/doltgresql/server/types"
@@ -28,6 +32,18 @@ import (
 // initJsonAggs registers the JSON aggregate functions to the catalog.
 func initJsonAggs() {
 	framework.RegisterAggregateFunction(jsonAgg)
+	framework.RegisterAggregateFunction(jsonbObjectAgg)
+}
+
+var jsonbObjectAgg = framework.Func2Aggregate{
+	Function2: framework.Function2{
+		Name: "jsonb_object_agg", Return: pgtypes.JsonB,
+		Parameters: [2]*pgtypes.DoltgresType{pgtypes.Any, pgtypes.Any}, Strict: false,
+		Callable: func(ctx *sql.Context, paramsAndReturn [3]*pgtypes.DoltgresType, key, value any) (any, error) {
+			return nil, nil
+		},
+	},
+	NewAggBuffer: newJsonbObjectAggBuffer, NewAggWindowFunc: newJsonbObjectAggWindowFunction,
 }
 
 // jsonAgg represents PostgreSQL's json_agg(anyelement) aggregate.
@@ -144,4 +160,174 @@ func joinJsonAggregateElements(elemType *pgtypes.DoltgresType, elements []string
 		separator = ", \n "
 	}
 	return "[" + strings.Join(elements, separator) + "]"
+}
+
+type jsonbObjectAggBuffer struct {
+	keyExpr, valueExpr sql.Expression
+	values             map[string]any
+}
+
+var _ sql.AggregationBuffer = (*jsonbObjectAggBuffer)(nil)
+
+func newJsonbObjectAggBuffer(exprs []sql.Expression) (sql.AggregationBuffer, error) {
+	if len(exprs) != 2 {
+		return nil, errors.Errorf("jsonb_object_agg expects two arguments")
+	}
+	return &jsonbObjectAggBuffer{keyExpr: exprs[0], valueExpr: exprs[1]}, nil
+}
+
+func (b *jsonbObjectAggBuffer) Dispose(*sql.Context) {}
+
+func (b *jsonbObjectAggBuffer) Eval(*sql.Context) (any, error) {
+	if b.values == nil {
+		return nil, nil
+	}
+	return buildJsonbObjectAggregate(b.values), nil
+}
+
+func (b *jsonbObjectAggBuffer) Update(ctx *sql.Context, row sql.Row) error {
+	key, include, err := framework.EvalAggregateArgument(ctx, b.keyExpr, row)
+	if err != nil || !include {
+		return err
+	}
+	value, _, err := framework.EvalAggregateArgument(ctx, b.valueExpr, row)
+	if err != nil {
+		return err
+	}
+	keyText, err := jsonbObjectAggKey(ctx, b.keyExpr, key)
+	if err != nil {
+		return err
+	}
+	jsonValue, err := jsonbObjectAggValue(ctx, b.valueExpr, value)
+	if err != nil {
+		return err
+	}
+	if b.values == nil {
+		b.values = make(map[string]any)
+	}
+	b.values[keyText] = jsonValue
+	return nil
+}
+
+func jsonbObjectAggKey(ctx *sql.Context, expr sql.Expression, value any) (string, error) {
+	if value == nil {
+		return "", pgerror.WithCandidateCode(errors.New("field name must not be null"), pgcode.InvalidParameterValue)
+	}
+	typ, ok := expr.Type(ctx).(*pgtypes.DoltgresType)
+	if !ok {
+		return "", errors.Errorf("jsonb_object_agg: expected PostgreSQL key type, got %T", expr.Type(ctx))
+	}
+	if typ.TypType == pgtypes.TypeType_Domain {
+		typ = typ.DomainUnderlyingBaseType()
+	}
+	if typ.IsArrayType() || typ.IsCompositeType() || typ.ID == pgtypes.Json.ID || typ.ID == pgtypes.JsonB.ID {
+		return "", pgerror.WithCandidateCode(
+			errors.New("key value must be scalar, not array, composite, or json"), pgcode.InvalidParameterValue)
+	}
+	value, err := sql.UnwrapAny(ctx, value)
+	if err != nil {
+		return "", err
+	}
+	if typ.ID == pgtypes.Bool.ID {
+		if boolean, ok := value.(bool); ok {
+			if boolean {
+				return "true", nil
+			}
+			return "false", nil
+		}
+	}
+	return typ.IoOutput(ctx, value)
+}
+
+func jsonbObjectAggValue(ctx *sql.Context, expr sql.Expression, value any) (any, error) {
+	typ, ok := expr.Type(ctx).(*pgtypes.DoltgresType)
+	if !ok {
+		return nil, errors.Errorf("jsonb_object_agg: expected PostgreSQL value type, got %T", expr.Type(ctx))
+	}
+	raw, err := functions.ValueToJsonRaw(ctx, typ, value)
+	if err != nil {
+		return nil, err
+	}
+	document, err := pgtypes.UnmarshalToJsonDocument(raw)
+	if err != nil {
+		return nil, err
+	}
+	return jsonbAggregateValueToInterface(document.Value), nil
+}
+
+func jsonbAggregateValueToInterface(value pgtypes.JsonValue) any {
+	switch value := value.(type) {
+	case pgtypes.JsonValueObject:
+		result := make(map[string]any, len(value.Items))
+		for _, item := range value.Items {
+			result[item.Key] = jsonbAggregateValueToInterface(item.Value)
+		}
+		return result
+	case pgtypes.JsonValueArray:
+		result := make([]any, len(value))
+		for idx, item := range value {
+			result[idx] = jsonbAggregateValueToInterface(item)
+		}
+		return result
+	case pgtypes.JsonValueString:
+		return string(value)
+	case pgtypes.JsonValueNumber:
+		decimal := apd.Decimal(value)
+		return &decimal
+	case pgtypes.JsonValueBoolean:
+		return bool(value)
+	case pgtypes.JsonValueNull:
+		return nil
+	default:
+		return nil
+	}
+}
+
+func buildJsonbObjectAggregate(values map[string]any) sql.JSONWrapper {
+	return gmstypes.JSONDocument{Val: values}
+}
+
+type jsonbObjectAggWindowFunction struct {
+	framework.WindowFramerState
+	keyExpr, valueExpr sql.Expression
+}
+
+var _ sql.WindowFunction = (*jsonbObjectAggWindowFunction)(nil)
+
+func newJsonbObjectAggWindowFunction(exprs []sql.Expression, window *sql.WindowDefinition) (sql.WindowFunction, error) {
+	if len(exprs) != 2 {
+		return nil, errors.Errorf("jsonb_object_agg expects two arguments")
+	}
+	w := &jsonbObjectAggWindowFunction{keyExpr: exprs[0], valueExpr: exprs[1]}
+	if err := w.BindFramer(window); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+func (w *jsonbObjectAggWindowFunction) Compute(ctx *sql.Context, interval sql.WindowInterval, buffer sql.WindowBuffer) (any, error) {
+	if interval.End <= interval.Start {
+		return nil, nil
+	}
+	values := make(map[string]any)
+	for idx := interval.Start; idx < interval.End; idx++ {
+		key, err := w.keyExpr.Eval(ctx, buffer[idx])
+		if err != nil {
+			return nil, err
+		}
+		value, err := w.valueExpr.Eval(ctx, buffer[idx])
+		if err != nil {
+			return nil, err
+		}
+		keyText, err := jsonbObjectAggKey(ctx, w.keyExpr, key)
+		if err != nil {
+			return nil, err
+		}
+		jsonValue, err := jsonbObjectAggValue(ctx, w.valueExpr, value)
+		if err != nil {
+			return nil, err
+		}
+		values[keyText] = jsonValue
+	}
+	return buildJsonbObjectAggregate(values), nil
 }
