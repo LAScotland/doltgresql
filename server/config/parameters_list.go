@@ -1952,7 +1952,8 @@ var postgresConfigParameters = map[string]sql.SystemVariable{
 	"lock_timeout": &Parameter{
 		Name:    "lock_timeout",
 		Default: int64(0),
-		// Unit: "ms",
+		Unit:    "ms",
+		// Parsing only: PostgreSQL lock-wait enforcement is not implemented.
 		Category:  "Client Connection Defaults / Statement Behavior",
 		ShortDesc: "Sets the maximum allowed duration of any wait for a lock.",
 		Context:   ParameterContextUser,

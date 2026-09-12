@@ -168,11 +168,15 @@ func (iter *pgSettingsRowIter) Next(ctx *sql.Context) (sql.Row, error) {
 	iter.idx++
 	param := iter.params[iter.idx-1]
 
-	// TODO: fill in unit, extra_desc, min_val, max_val, and enumvals from the parameter definitions
+	var unit any
+	if param.Unit != "" {
+		unit = param.Unit
+	}
+	// TODO: fill in extra_desc, min_val, max_val, and enumvals from the parameter definitions
 	return sql.Row{
 		param.Name,                               // name
 		currentSettingValue(ctx, param),          // setting
-		nil,                                      // unit
+		unit,                                     // unit
 		param.Category,                           // category
 		param.ShortDesc,                          // short_desc
 		nil,                                      // extra_desc

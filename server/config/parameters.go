@@ -76,6 +76,7 @@ type Parameter struct {
 	ShortDesc    string
 	Context      ParameterContext
 	Type         sql.Type
+	Unit         string // Base unit for explicitly supported unit-aware parameters.
 	Source       ParameterSource
 	ResetVal     any
 	Scope        sql.SystemVariableScope
@@ -117,6 +118,15 @@ func (p *Parameter) GetDefault() any {
 
 // InitValue implements sql.SystemVariable.
 func (p *Parameter) InitValue(ctx *sql.Context, val any, global bool) (sql.SystemVarValue, error) {
+	if p.Unit == "ms" {
+		if input, ok := val.(string); ok {
+			parsed, err := parseMilliseconds(p.Name, input)
+			if err != nil {
+				return sql.SystemVarValue{}, err
+			}
+			val = parsed
+		}
+	}
 	convertedVal, _, err := p.Type.Convert(ctx, val)
 	if err != nil {
 		return sql.SystemVarValue{}, err
@@ -144,7 +154,7 @@ func (p *Parameter) SetValue(ctx *sql.Context, val any, global bool) (sql.System
 	if p.IsReadOnly() {
 		return sql.SystemVarValue{}, ErrCannotChangeAtRuntime.New(p.Name)
 	}
-	// TODO: Do parsing of units for memory and time parameters
+	// Unit-aware parameters are normalised in InitValue, including SET LOCAL and set_config.
 	return p.InitValue(ctx, val, global)
 }
 
