@@ -823,6 +823,41 @@ var ValuesStatementTests = []ScriptTest{
 		},
 	},
 	{
+		Name: "VALUES type refresh follows field identity across UPDATE FROM",
+		SetUpScript: []string{
+			`CREATE TABLE values_type_target (id int PRIMARY KEY, name jsonb)`,
+			`INSERT INTO values_type_target VALUES (1, '{"en_US":"Old"}'), (2, '{"en_US":"Old Two"}')`,
+			`CREATE TABLE values_type_join (id int PRIMARY KEY, enabled boolean)`,
+			`INSERT INTO values_type_join VALUES (1, true), (2, true)`,
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: `UPDATE values_type_target AS target
+SET name = CASE WHEN source.name::jsonb IS NULL THEN NULL ELSE
+  COALESCE(target.name, jsonb_build_object('en_US', jsonb_path_query_first(source.name::jsonb, '$.*'))) || source.name::jsonb END
+FROM (VALUES (1, '{"en_US":"New"}'), (2, '{"en_US":"New Two"}')) AS source(id, name)
+WHERE target.id = source.id`,
+			},
+			{Query: `SELECT id, name FROM values_type_target ORDER BY id`, Expected: []sql.Row{{1, `{"en_US": "New"}`}, {2, `{"en_US": "New Two"}`}}},
+			{
+				Query: `UPDATE values_type_target AS target
+SET name = source.name::jsonb
+FROM (VALUES (1, '{"en_US":"Joined"}'), (2, '{"en_US":"Joined Two"}')) AS source(id, name)
+JOIN values_type_join AS gate ON gate.id = source.id
+WHERE target.id = source.id AND gate.enabled`,
+			},
+			{Query: `SELECT id, name FROM values_type_target ORDER BY id`, Expected: []sql.Row{{1, `{"en_US": "Joined"}`}, {2, `{"en_US": "Joined Two"}`}}},
+			{
+				Query: `SELECT outer_target.name,
+  (SELECT count(*) FROM (VALUES (1, 'one'), (2, 'two')) AS inner_source(id, name) WHERE inner_source.id = outer_target.id)
+FROM values_type_target AS outer_target ORDER BY outer_target.id`,
+				Expected: []sql.Row{{`{"en_US": "Joined"}`, int64(1)}, {`{"en_US": "Joined Two"}`, int64(1)}},
+			},
+			{Query: `SELECT MIN(n) FROM (VALUES (1), (2.5), (3)) AS source(n)`, Expected: []sql.Row{{Numeric("1")}}},
+			{Query: `SELECT MIN(n), count(*) FROM (VALUES (1), (2.5), (3)) AS source(n)`, Expected: []sql.Row{{Numeric("1"), int64(3)}}},
+		},
+	},
+	{
 		Name: "values in JOIN preserves inner subquery semantics",
 		Assertions: []ScriptTestAssertion{
 			{

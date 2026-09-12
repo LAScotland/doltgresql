@@ -88,10 +88,7 @@ func ResolveValuesTypes(ctx *sql.Context, a *analyzer.Analyzer, node sql.Node, s
 				return expr, transform.SameTree, nil
 			}
 
-			return expression.NewGetFieldWithTable(
-				gf.Index(), int(gf.TableId()), newType,
-				gf.Database(), gf.Table(), gf.Name(), gf.IsNullable(ctx),
-			), transform.NewTree, nil
+			return getFieldWithType(ctx, gf, newType), transform.NewTree, nil
 		})
 		if err != nil {
 			return nil, transform.SameTree, err
@@ -126,23 +123,42 @@ func ResolveValuesTypes(ctx *sql.Context, a *analyzer.Analyzer, node sql.Node, s
 			if _, isVDT := transformedVDTs[gf.TableId()]; isVDT {
 				return expr, transform.SameTree, nil
 			}
-			// Collect the schema that this node's children produce
+			// Use an ordinal only when name and source corroborate its binding.
+			// Before index assignment, require a unique producer match instead.
+			// UPDATE ... FROM and joins can contain same-named columns of different types.
 			var childSchema sql.Schema
 			for _, child := range n.Children() {
 				childSchema = append(childSchema, child.Schema(ctx)...)
 			}
-			// TODO: GMS is case-insensitive for identifiers, so aggregate
-			// GetField names and child schema names may differ in casing.
-			// We use strings.ToLower to handle this, but Postgres requires
-			// case-sensitivity for quoted identifiers, which this breaks.
-			gfName := strings.ToLower(gf.Name())
-			for _, col := range childSchema {
-				if strings.ToLower(col.Name) == gfName && gf.Type(ctx) != col.Type {
-					return expression.NewGetFieldWithTable(
-						gf.Index(), int(gf.TableId()), col.Type,
-						gf.Database(), gf.Table(), gf.Name(), gf.IsNullable(ctx),
-					), transform.NewTree, nil
+			idx := gf.Index()
+			var col *sql.Column
+			if idx >= 0 && idx < len(childSchema) {
+				candidate := childSchema[idx]
+				if candidate.Name == gf.Name() && candidate.Source == gf.Table() {
+					col = candidate
 				}
+			}
+			if col == nil {
+				if gf.IsQuotedIdentifier() {
+					return expr, transform.SameTree, nil
+				}
+				matchedIdx := -1
+				for i, candidate := range childSchema {
+					if strings.EqualFold(candidate.Name, gf.Name()) &&
+						candidate.Source == gf.Table() {
+						if matchedIdx >= 0 {
+							return expr, transform.SameTree, nil
+						}
+						matchedIdx = i
+					}
+				}
+				if matchedIdx < 0 {
+					return expr, transform.SameTree, nil
+				}
+				col = childSchema[matchedIdx]
+			}
+			if gf.Type(ctx) != col.Type && !gf.Type(ctx).Equals(col.Type) {
+				return getFieldWithType(ctx, gf, col.Type), transform.NewTree, nil
 			}
 			return expr, transform.SameTree, nil
 		})
@@ -152,6 +168,14 @@ func ResolveValuesTypes(ctx *sql.Context, a *analyzer.Analyzer, node sql.Node, s
 	}
 
 	return node, same, nil
+}
+
+func getFieldWithType(ctx *sql.Context, gf *expression.GetField, typ sql.Type) *expression.GetField {
+	updated := expression.NewGetFieldWithTable(
+		gf.Index(), int(gf.TableId()), typ,
+		gf.Database(), gf.Table(), gf.Name(), gf.IsNullable(ctx),
+	).WithId(gf.Id()).(*expression.GetField)
+	return updated
 }
 
 // transformValuesNode transforms a plan.Values or plan.ValueDerivedTable node to use common types
