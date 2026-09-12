@@ -2190,6 +2190,11 @@ func TestJsonFunctions(t *testing.T) {
 					Expected:         []sql.Row{{`[1,"2",3]`}},
 				},
 				{
+					Query:            `SELECT json_build_array(json_build_object('value', 7));`,
+					ExpectedColNames: []string{"json_build_array"},
+					Expected:         []sql.Row{{`[{"value":7}]`}},
+				},
+				{
 					Query:            `SELECT json_build_array();`,
 					Skip:             true, // variadic functions can't handle 0 arguments right now
 					ExpectedColNames: []string{"json_build_array"},
@@ -2223,6 +2228,10 @@ func TestJsonFunctions(t *testing.T) {
 		},
 		{
 			Name: "jsonb_build_array",
+			SetUpScript: []string{
+				`CREATE TABLE json_build_array_docs (id int PRIMARY KEY, doc jsonb);`,
+				`INSERT INTO json_build_array_docs VALUES (1, '{"a":{"stored":true}}');`,
+			},
 			Assertions: []ScriptTestAssertion{
 				{
 					Query:            `SELECT jsonb_build_array(1, 2, 3);`,
@@ -2233,6 +2242,21 @@ func TestJsonFunctions(t *testing.T) {
 					Query:            `SELECT jsonb_build_array(1, '2', 3);`,
 					ExpectedColNames: []string{"jsonb_build_array"},
 					Expected:         []sql.Row{{`[1, "2", 3]`}},
+				},
+				{
+					Query:            `SELECT jsonb_build_array(jsonb_path_query_first('{"a":[1,2]}'::jsonb, '$.*'), jsonb_path_query_first('{"a":null}'::jsonb, '$.*'));`,
+					ExpectedColNames: []string{"jsonb_build_array"},
+					Expected:         []sql.Row{{`[[1, 2], null]`}},
+				},
+				{
+					Query:            `SELECT jsonb_build_array(jsonb_path_query_first(doc, '$.*')) FROM json_build_array_docs WHERE id = 1;`,
+					ExpectedColNames: []string{"jsonb_build_array"},
+					Expected:         []sql.Row{{`[{"stored": true}]`}},
+				},
+				{
+					Query:            `SELECT jsonb_build_array(ARRAY[1,2]);`,
+					ExpectedColNames: []string{"jsonb_build_array"},
+					Expected:         []sql.Row{{`[[1, 2]]`}},
 				},
 				{
 					Query:            `SELECT jsonb_build_array();`,

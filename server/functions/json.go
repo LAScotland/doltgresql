@@ -237,7 +237,18 @@ var json_build_array = framework.Function1{
 
 func json_build_array_callable(ctx *sql.Context, _ [2]*pgtypes.DoltgresType, val1 any) (any, error) {
 	inputArray := val1.([]any)
-	return types.JSONDocument{Val: inputArray}, nil
+	jsonArray := make([]any, len(inputArray))
+	for i, value := range inputArray {
+		if wrapper, ok := value.(sql.JSONWrapper); ok {
+			var err error
+			value, err = wrapper.ToInterface(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		jsonArray[i] = value
+	}
+	return types.JSONDocument{Val: jsonArray}, nil
 }
 
 // json_build_object represents the PostgreSQL function json_build_object.
