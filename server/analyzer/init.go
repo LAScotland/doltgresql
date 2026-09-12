@@ -60,12 +60,18 @@ const (
 	ruleId_NormalizeCreateTableInherits                                  // normalizeCreateTableInherits
 	ruleId_ExpandInheritedTables
 	ruleId_ValidateInheritedTableMutations
+	ruleId_UnwrapVirtualColumnTableForDropConstraint
 )
 
 // Init adds additional rules to the analyzer to handle Doltgres-specific functionality.
 func Init() {
 	// OnceBeforeDefault runs before AlwaysBeforeDefault in GMS
 	analyzer.OnceBeforeDefault = append([]analyzer.Rule{
+		// Expression indexes cause the plan builder to expose a VirtualColumnTable. The
+		// upstream DROP CONSTRAINT resolver checks table capabilities on that wrapper
+		// rather than its underlying table, so remove this read-only planning wrapper
+		// before the resolver determines the constraint kind.
+		{Id: ruleId_UnwrapVirtualColumnTableForDropConstraint, Apply: unwrapVirtualColumnTableForDropConstraint},
 		{Id: ruleId_NormalizeCreateTableInherits, Apply: normalizeCreateTableInherits},
 		{Id: ruleId_ExpandInheritedTables, Apply: expandInheritedTables},
 		{Id: ruleId_ResolveType, Apply: ResolveType}, // ResolveType rule must run before simplifyFilters rule in GMS
