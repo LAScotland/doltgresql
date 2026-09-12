@@ -61,6 +61,7 @@ const (
 	ruleId_ExpandInheritedTables
 	ruleId_ValidateInheritedTableMutations
 	ruleId_UnwrapVirtualColumnTableForDropConstraint
+	ruleId_PrepareDropUniqueConstraintWithForeignKey
 )
 
 // Init adds additional rules to the analyzer to handle Doltgres-specific functionality.
@@ -78,6 +79,7 @@ func Init() {
 		{Id: ruleId_AddLikePrefixRanges, Apply: AddLikePrefixRanges},
 		{Id: ruleId_ApplyTablesForAnalyzeAllTables, Apply: applyTablesForAnalyzeAllTables},
 		{Id: ruleId_ConvertDropPrimaryKeyConstraint, Apply: convertDropPrimaryKeyConstraint},
+		{Id: ruleId_PrepareDropUniqueConstraintWithForeignKey, Apply: prepareDropUniqueConstraintWithForeignKey},
 		{Id: ruleId_ResolveTableForDDL, Apply: resolveTableForDDL},
 		// Resolve omitted REFERENCES columns before GMS validates foreign keys.
 		{Id: ruleId_ResolveImplicitFk, Apply: resolveImplicitForeignKeyColumns}},
