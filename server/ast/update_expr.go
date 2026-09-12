@@ -15,6 +15,7 @@
 package ast
 
 import (
+	"github.com/cockroachdb/errors"
 	vitess "github.com/dolthub/vitess/go/vt/sqlparser"
 
 	"github.com/dolthub/doltgresql/postgres/parser/sem/tree"
@@ -24,6 +25,9 @@ import (
 func nodeUpdateExpr(ctx *Context, node *tree.UpdateExpr) (vitess.AssignmentExprs, error) {
 	if node == nil {
 		return nil, nil
+	}
+	if node.Tuple {
+		return nodeTupleUpdateExpr(ctx, node)
 	}
 	expr, err := nodeExpr(ctx, node.Expr)
 	if err != nil {
@@ -37,6 +41,34 @@ func nodeUpdateExpr(ctx *Context, node *tree.UpdateExpr) (vitess.AssignmentExprs
 			},
 			Expr: expr,
 		})
+	}
+	return assignmentExprs, nil
+}
+
+// nodeTupleUpdateExpr assigns each target column the expression at the same position in the RHS tuple. Keeping the
+// expressions as sibling assignments lets the update planner evaluate all of them against the input row, preserving
+// PostgreSQL's simultaneous assignment semantics (for example, SET (a, b) = (b, a)).
+func nodeTupleUpdateExpr(ctx *Context, node *tree.UpdateExpr) (vitess.AssignmentExprs, error) {
+	if _, ok := node.Expr.(*tree.Subquery); ok {
+		return nil, errors.Errorf("tuple assignment from a subquery is not yet supported")
+	}
+	tuple, ok := node.Expr.(*tree.Tuple)
+	if !ok {
+		return nil, errors.Errorf("tuple assignment requires an explicit row expression")
+	}
+	if len(node.Names) != len(tuple.Exprs) {
+		return nil, errors.Errorf("number of columns does not match number of values")
+	}
+	assignmentExprs := make(vitess.AssignmentExprs, len(node.Names))
+	for i, name := range node.Names {
+		expr, err := nodeExpr(ctx, tuple.Exprs[i])
+		if err != nil {
+			return nil, err
+		}
+		assignmentExprs[i] = &vitess.AssignmentExpr{
+			Name: &vitess.ColName{Name: vitess.NewColIdent(string(name))},
+			Expr: expr,
+		}
 	}
 	return assignmentExprs, nil
 }
