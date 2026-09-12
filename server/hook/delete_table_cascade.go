@@ -78,23 +78,41 @@ type cascadeView struct {
 // path. Column-level dependencies are not tracked, so a view is only dropped when a dropped relation appears in its
 // definition by name.
 func cascadeDropViews(ctx *sql.Context, runner sql.StatementRunner, allDeletedTables []doltdb.TableName) error {
+	dependentViews, err := DependentViews(ctx, allDeletedTables)
+	if err != nil {
+		return err
+	}
+	for _, view := range dependentViews {
+		// TODO: issue a notice that the view is being dropped ("drop cascades to view ...")
+		dropStmt := fmt.Sprintf(`DROP VIEW %s.%s;`, quoteIdentifier(view.Schema), quoteIdentifier(view.Name))
+		if err = runStatement(ctx, runner, dropStmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DependentViews returns every view that directly or transitively references one of the supplied relations. The
+// result does not include the supplied relations themselves. This is also used by DROP VIEW CASCADE so that table
+// and view drops use the same name resolution and dependency rules.
+func DependentViews(ctx *sql.Context, relations []doltdb.TableName) ([]doltdb.TableName, error) {
 	views, viewExists, err := loadDatabaseViews(ctx)
 	if err != nil || len(views) == 0 {
-		return err
+		return nil, err
 	}
 	_, root, err := core.GetRootFromContext(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	searchPath, err := settings.GetCurrentSchemas(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Compute the closure of dependent relations: dropping a view may make further views dependent, so iterate until
 	// no new views are added.
-	closure := make(map[relationKey]struct{}, len(allDeletedTables))
-	for _, tblName := range allDeletedTables {
+	closure := make(map[relationKey]struct{}, len(relations))
+	for _, tblName := range relations {
 		closure[newRelationKey(tblName.Schema, tblName.Name)] = struct{}{}
 	}
 	for changed := true; changed; {
@@ -105,7 +123,7 @@ func cascadeDropViews(ctx *sql.Context, runner sql.StatementRunner, allDeletedTa
 			}
 			dependent, err := viewDependsOnClosure(ctx, root, view, closure, searchPath, viewExists)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if dependent {
 				view.dependent = true
@@ -115,17 +133,67 @@ func cascadeDropViews(ctx *sql.Context, runner sql.StatementRunner, allDeletedTa
 		}
 	}
 
+	dependentViews := make([]doltdb.TableName, 0)
 	for _, view := range views {
 		if !view.dependent {
 			continue
 		}
-		// TODO: issue a notice that the view is being dropped ("drop cascades to view ...")
-		dropStmt := fmt.Sprintf(`DROP VIEW %s.%s;`, quoteIdentifier(view.schema), quoteIdentifier(view.name))
-		if err = runStatement(ctx, runner, dropStmt); err != nil {
-			return err
+		if relationInSet(relations, view.schema, view.name) {
+			continue
+		}
+		dependentViews = append(dependentViews, doltdb.TableName{Schema: view.schema, Name: view.name})
+	}
+	return dependentViews, nil
+}
+
+// DependentViewsForDropView is the fail-closed form used before DROP VIEW CASCADE. Stored view definitions do not
+// retain the search path from creation time, so an unqualified reference with the same name as a target is treated as
+// a possible dependency even when the session's current search path resolves it elsewhere.
+func DependentViewsForDropView(ctx *sql.Context, relations []doltdb.TableName) ([]doltdb.TableName, error) {
+	dependent, err := DependentViews(ctx, relations)
+	if err != nil {
+		return nil, err
+	}
+	views, _, err := loadDatabaseViews(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[relationKey]struct{}, len(dependent))
+	for _, view := range dependent {
+		seen[newRelationKey(view.Schema, view.Name)] = struct{}{}
+	}
+	for _, view := range views {
+		if relationInSet(relations, view.schema, view.name) {
+			continue
+		}
+		for _, ref := range view.refs {
+			if ref.ExplicitSchema {
+				continue
+			}
+			for _, relation := range relations {
+				if !strings.EqualFold(ref.Table(), relation.Name) {
+					continue
+				}
+				key := newRelationKey(view.schema, view.name)
+				if _, ok := seen[key]; !ok {
+					dependent = append(dependent, doltdb.TableName{Schema: view.schema, Name: view.name})
+					seen[key] = struct{}{}
+				}
+				break
+			}
 		}
 	}
-	return nil
+	return dependent, nil
+}
+
+func relationInSet(relations []doltdb.TableName, schema, name string) bool {
+	key := newRelationKey(schema, name)
+	for _, relation := range relations {
+		if newRelationKey(relation.Schema, relation.Name) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // loadDatabaseViews returns all views in the current database with their parsed table references, along with a set of

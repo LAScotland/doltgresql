@@ -16,37 +16,51 @@ package ast
 
 import (
 	"github.com/cockroachdb/errors"
-
 	vitess "github.com/dolthub/vitess/go/vt/sqlparser"
 
 	"github.com/dolthub/doltgresql/postgres/parser/sem/tree"
+	"github.com/dolthub/doltgresql/server/auth"
+	pgnodes "github.com/dolthub/doltgresql/server/node"
 )
 
 // nodeDropView handles *tree.DropView nodes.
-func nodeDropView(ctx *Context, node *tree.DropView) (*vitess.DDL, error) {
+func nodeDropView(ctx *Context, node *tree.DropView) (vitess.Statement, error) {
 	if node == nil || len(node.Names) == 0 {
 		return nil, nil
 	}
-	switch node.DropBehavior {
-	case tree.DropDefault:
-		// Default behavior, nothing to do
-	case tree.DropRestrict:
+	if node.IsMaterialized {
+		return nil, errors.Errorf("DROP MATERIALIZED VIEW is not yet supported")
+	}
+	if node.DropBehavior == tree.DropRestrict {
 		return nil, errors.Errorf("RESTRICT is not yet supported")
-	case tree.DropCascade:
-		return nil, errors.Errorf("CASCADE is not yet supported")
 	}
 	tableNames := make([]vitess.TableName, len(node.Names))
+	authTableNames := make([]string, 0, len(node.Names)*3)
 	for i := range node.Names {
 		var err error
 		tableNames[i], err = nodeTableName(ctx, &node.Names[i])
 		if err != nil {
 			return nil, err
 		}
+		authTableNames = append(authTableNames, tableNames[i].DbQualifier.String(),
+			tableNames[i].SchemaQualifier.String(), tableNames[i].Name.String())
 	}
-	//TODO: handle IsMaterialized
+	authInformation := vitess.AuthInformation{
+		AuthType: auth.AuthType_DROPTABLE, TargetType: auth.AuthTargetType_TableIdentifiers, TargetNames: authTableNames,
+	}
+	if node.DropBehavior == tree.DropCascade {
+		names := make([]pgnodes.DropViewName, len(tableNames))
+		for i := range tableNames {
+			if tableNames[i].DbQualifier.String() != "" {
+				return nil, errors.Errorf("DROP VIEW is currently only supported for the current database")
+			}
+			names[i] = pgnodes.DropViewName{Schema: tableNames[i].SchemaQualifier.String(), Name: tableNames[i].Name.String()}
+		}
+		return vitess.InjectedStatement{
+			Statement: pgnodes.NewDropViewCascade(names, node.IfExists), Auth: authInformation,
+		}, nil
+	}
 	return &vitess.DDL{
-		Action:    vitess.DropStr,
-		IfExists:  node.IfExists,
-		FromViews: tableNames,
+		Action: vitess.DropStr, IfExists: node.IfExists, FromViews: tableNames, Auth: authInformation,
 	}, nil
 }
