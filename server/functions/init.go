@@ -54,6 +54,7 @@ func initTypeFunctions() {
 	initRegclass()
 	initRegproc()
 	initRegtype()
+	initRegnamespace()
 	initShell()
 	initText()
 	initTid()

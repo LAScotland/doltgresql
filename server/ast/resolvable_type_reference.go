@@ -166,6 +166,8 @@ func nodeResolvableTypeReference(ctx *Context, typ tree.ResolvableTypeReference,
 				doltgresType = pgtypes.Regclass
 			case oid.T_regproc:
 				doltgresType = pgtypes.Regproc
+			case oid.T_regnamespace:
+				doltgresType = pgtypes.Regnamespace
 			case oid.T_regtype:
 				doltgresType = pgtypes.Regtype
 			case oid.T_text:
