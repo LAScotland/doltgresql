@@ -2214,6 +2214,11 @@ func TestJsonFunctions(t *testing.T) {
 					ExpectedColNames: []string{"json_build_object"},
 					Expected:         []sql.Row{{`{"1":2,"b":3}`}},
 				},
+				{
+					Query:            `SELECT json_build_object('nested', json_build_object('value', 7));`,
+					ExpectedColNames: []string{"json_build_object"},
+					Expected:         []sql.Row{{`{"nested":{"value":7}}`}},
+				},
 			},
 		},
 		{
@@ -2253,6 +2258,15 @@ func TestJsonFunctions(t *testing.T) {
 					Query:            `SELECT jsonb_build_object(1, 2, 'b', 3);`,
 					ExpectedColNames: []string{"jsonb_build_object"},
 					Expected:         []sql.Row{{`{"1": 2, "b": 3}`}},
+				},
+				{
+					Query:            `SELECT jsonb_build_object('string', jsonb_path_query_first('{"a":"Euros"}'::jsonb, '$.*'), 'nested', jsonb_path_query_first('{"a":{"value":7}}'::jsonb, '$.*'), 'null', jsonb_path_query_first('{"a":null}'::jsonb, '$.*'));`,
+					ExpectedColNames: []string{"jsonb_build_object"},
+					Expected:         []sql.Row{{`{"null": null, "nested": {"value": 7}, "string": "Euros"}`}},
+				},
+				{
+					Query:    `SELECT COALESCE(NULL::jsonb, jsonb_build_object('en_US', jsonb_path_query_first('{"fr_FR":"Euros"}'::jsonb, '$.*'))) || '{"fr_FR":"Euros"}'::jsonb;`,
+					Expected: []sql.Row{{`{"en_US": "Euros", "fr_FR": "Euros"}`}},
 				},
 			},
 		},

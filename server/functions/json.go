@@ -280,6 +280,16 @@ func buildJsonObject(ctx *sql.Context, fnName string, _ [2]*pgtypes.DoltgresType
 				key = fmt.Sprintf("%v", e)
 			}
 		} else {
+			// JSON-returning expressions are represented by JSONWrapper values.
+			// Store their JSON value rather than nesting the internal wrapper in
+			// the resulting document.
+			if wrapper, ok := e.(sql.JSONWrapper); ok {
+				var err error
+				e, err = wrapper.ToInterface(ctx)
+				if err != nil {
+					return types.JSONDocument{}, err
+				}
+			}
 			jsonObject[key] = e
 			key = ""
 		}
