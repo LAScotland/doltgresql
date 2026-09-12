@@ -860,7 +860,7 @@ func (u *sqlSymUnion) vacuumTableAndColsList() tree.VacuumTableAndColsList {
 // needed to make the grammar LALR(1). GENERATED_ALWAYS is needed to support
 // the Postgres syntax for computed columns along with our family related
 // extensions (CREATE FAMILY/CREATE FAMILY family_name).
-%token NOT_LA WITH_LA AS_LA GENERATED_ALWAYS
+%token NOT_LA WITH_LA AS_LA GENERATED_ALWAYS JSON_PATH_EXISTS
 
 %union {
   id    int32
@@ -1449,7 +1449,7 @@ func (u *sqlSymUnion) vacuumTableAndColsList() tree.VacuumTableAndColsList {
 %nonassoc  '<' '>' '=' LESS_EQUALS GREATER_EQUALS NOT_EQUALS
 %nonassoc  '~' BETWEEN DEFERRABLE IN LIKE ILIKE SIMILAR NOT_REGMATCH REGIMATCH NOT_REGIMATCH NOT_LA TEXTSEARCHMATCH
 %nonassoc  ESCAPE              // ESCAPE must be just above LIKE/ILIKE/SIMILAR
-%nonassoc  CONTAINS CONTAINED_BY '?' JSON_SOME_EXISTS JSON_ALL_EXISTS
+%nonassoc  CONTAINS CONTAINED_BY '?' JSON_SOME_EXISTS JSON_ALL_EXISTS JSON_PATH_EXISTS
 %nonassoc  OVERLAPS
 %left      POSTFIXOP           // dummy for postfix OP rules
 // To support target_elem without AS, we must give IDENT an explicit priority
@@ -12862,6 +12862,10 @@ a_expr:
   {
     $$.val = &tree.ComparisonExpr{Operator: tree.JSONAllExists, Left: $1.expr(), Right: $3.expr()}
   }
+| a_expr JSON_PATH_EXISTS a_expr
+  {
+    $$.val = &tree.ComparisonExpr{Operator: tree.JSONPathExists, Left: $1.expr(), Right: $3.expr()}
+  }
 | a_expr CONTAINS a_expr
   {
     $$.val = &tree.ComparisonExpr{Operator: tree.Contains, Left: $1.expr(), Right: $3.expr()}
@@ -13212,6 +13216,10 @@ a_expr:
 | a_expr OPERATOR '(' schema_name '.' JSON_ALL_EXISTS ')' a_expr
   {
     $$.val = &tree.ComparisonExpr{Schema: tree.Name($4), Operator: tree.JSONAllExists, Left: $1.expr(), Right: $8.expr()}
+  }
+| a_expr OPERATOR '(' schema_name '.' JSON_PATH_EXISTS ')' a_expr
+  {
+    $$.val = &tree.ComparisonExpr{Schema: tree.Name($4), Operator: tree.JSONPathExists, Left: $1.expr(), Right: $8.expr()}
   }
 | a_expr OPERATOR '(' schema_name '.' '=' ')' a_expr
   {
@@ -14172,6 +14180,7 @@ operator:
 | '?' { $$.val = tree.JSONExists }
 | JSON_SOME_EXISTS { $$.val = tree.JSONSomeExists }
 | JSON_ALL_EXISTS { $$.val = tree.JSONAllExists }
+| JSON_PATH_EXISTS { $$.val = tree.JSONPathExists }
 | CONTAINS { $$.val = tree.Contains }
 | CONTAINED_BY { $$.val = tree.ContainedBy }
 | CONCAT { $$.val = tree.Concat }

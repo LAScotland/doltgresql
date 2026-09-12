@@ -395,6 +395,7 @@ const (
 	JSONExists
 	JSONSomeExists
 	JSONAllExists
+	JSONPathExists
 	Overlaps
 
 	// The following operators will always be used with an associated SubOperator.
@@ -447,6 +448,7 @@ var comparisonOpName = [...]string{
 	JSONExists:        "?",
 	JSONSomeExists:    "?|",
 	JSONAllExists:     "?&",
+	JSONPathExists:    "@?",
 	Overlaps:          "&&",
 	Any:               "ANY",
 	Some:              "SOME",

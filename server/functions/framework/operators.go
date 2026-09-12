@@ -50,6 +50,7 @@ const (
 	Operator_BinaryJSONTopLevel                        // ?
 	Operator_BinaryJSONTopLevelAny                     // ?|
 	Operator_BinaryJSONTopLevelAll                     // ?&
+	Operator_BinaryJSONPathExists                      // @?
 	Operator_BinaryL2Distance                          // <->
 	Operator_BinaryL1Distance                          // <+>
 	Operator_BinaryCosineDistance                      // <=>
@@ -205,6 +206,8 @@ func (o Operator) String() string {
 		return "?|"
 	case Operator_BinaryJSONTopLevelAll:
 		return "?&"
+	case Operator_BinaryJSONPathExists:
+		return "@?"
 	case Operator_BinaryL2Distance:
 		return "<->"
 	case Operator_BinaryL1Distance:
@@ -294,6 +297,8 @@ func GetOperatorFromString(op string) (Operator, error) {
 		return Operator_BinaryJSONTopLevelAny, nil
 	case "?&":
 		return Operator_BinaryJSONTopLevelAll, nil
+	case "@?":
+		return Operator_BinaryJSONPathExists, nil
 	case "<->":
 		return Operator_BinaryL2Distance, nil
 	case "<+>":

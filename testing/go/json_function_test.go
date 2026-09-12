@@ -1364,6 +1364,50 @@ func TestJsonbPathQueryFirstCompatibility(t *testing.T) {
 	})
 }
 
+func TestJsonbPathExistsOperatorCompatibility(t *testing.T) {
+	RunScripts(t, []ScriptTest{
+		{
+			Name: "bounded jsonb path exists operator",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT '{"a":1,"b":2,"c":"1","d":null}'::jsonb @? '$.* ? (@ == 1 || @ == 2)';`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT '{"a":3,"b":"2","c":null}'::jsonb @? '$.* ? (@ == 1 || @ == 2)';`, Expected: []sql.Row{{"f"}}},
+				{Query: `SELECT '{"exact":9007199254740991}'::jsonb @? '$.* ? (@ == 9007199254740991)';`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT '{"exact":9007199254740991}'::jsonb @? '$.* ? (@ == 9007199254740990)';`, Expected: []sql.Row{{"f"}}},
+				{Query: `SELECT NULL::jsonb @? '$.* ? (@ == 1)';`, Expected: []sql.Row{{nil}}},
+				// Lax mode unwraps arrays while applying the predicate and applies the
+				// member wildcard to objects contained in a top-level array.
+				{Query: `SELECT '{"a":[1,2]}'::jsonb @? '$.* ? (@ == 2)';`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT '{"a":[[12]]}'::jsonb @? '$.* ? (@ == 12)';`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT '{"a":[[[12]]]}'::jsonb @? '$.* ? (@ == 12)';`, Expected: []sql.Row{{"f"}}},
+				{Query: `SELECT '[{"a":1},{"b":2}]'::jsonb @? '$.* ? (@ == 2)';`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT '[1,2,3]'::jsonb @? '$.* ? (@ == 2)';`, Expected: []sql.Row{{"f"}}},
+				{Query: `SELECT '{"a":[1,2]}'::jsonb @? 'strict $.* ? (@ == 2)';`, Expected: []sql.Row{{"f"}}},
+				{Query: `SELECT '[{"a":1}]'::jsonb @? 'strict $.* ? (@ == 1)';`, Expected: []sql.Row{{nil}}},
+				{Query: `SELECT '1'::jsonb @? 'strict $.* ? (@ == 1)';`, Expected: []sql.Row{{nil}}},
+				{Query: `SELECT '{"a":1}'::jsonb @? '$.a ? (@ == 1)';`, ExpectedErr: `jsonb @? compatibility operator does not support path "$.a ? (@ == 1)"`, ExpectedErrCode: "0A000"},
+			},
+		},
+		{
+			Name: "jsonb path exists precedence and existing operators",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT '{"a":1}'::jsonb @? '$.* ? (@ == 1)' AND false;`, Expected: []sql.Row{{"f"}}},
+				{Query: `SELECT false OR '{"a":1}'::jsonb @? '$.* ? (@ == 1)';`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT '{"a":1}'::jsonb ? 'a', '{"a":1}'::jsonb -> 'a';`, Expected: []sql.Row{{"t", "1"}}},
+			},
+		},
+		{
+			Name: "jsonb path exists over a table column",
+			SetUpScript: []string{
+				`CREATE TABLE jsonpath_exists_docs (id int PRIMARY KEY, value jsonb);`,
+				`INSERT INTO jsonpath_exists_docs VALUES (1, '{"company":10}'), (2, '{"company":20}'), (3, NULL);`,
+			},
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT id FROM jsonpath_exists_docs WHERE value @? '$.* ? (@ == 20 || @ == 30)' ORDER BY id;`, Expected: []sql.Row{{2}}},
+			},
+		},
+	})
+}
+
 func TestJsonbPathQueryArrayCompatibility(t *testing.T) {
 	RunScripts(t, []ScriptTest{
 		{

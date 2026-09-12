@@ -478,6 +478,11 @@ func nodeExpr(ctx *Context, node tree.Expr) (vitess.Expr, error) {
 				Expression: pgexprs.NewBinaryOperator(framework.Operator_BinaryJSONTopLevelAll),
 				Children:   vitess.Exprs{left, right},
 			}, nil
+		case tree.JSONPathExists:
+			return vitess.InjectedExpr{
+				Expression: pgexprs.NewBinaryOperator(framework.Operator_BinaryJSONPathExists),
+				Children:   vitess.Exprs{left, right},
+			}, nil
 		case tree.Overlaps:
 			return nil, errors.Errorf("&& is not yet supported")
 		case tree.Any:

@@ -75,6 +75,7 @@ func initJSON() {
 	framework.RegisterBinaryFunction(framework.Operator_BinaryJSONTopLevel, jsonb_exists)
 	framework.RegisterBinaryFunction(framework.Operator_BinaryJSONTopLevelAny, jsonb_exists_any)
 	framework.RegisterBinaryFunction(framework.Operator_BinaryJSONTopLevelAll, jsonb_exists_all)
+	framework.RegisterBinaryFunction(framework.Operator_BinaryJSONPathExists, jsonb_path_exists_opr)
 	framework.RegisterBinaryFunction(framework.Operator_BinaryMinus, jsonb_delete_text)
 	framework.RegisterBinaryFunction(framework.Operator_BinaryMinus, jsonb_delete_text_array)
 	framework.RegisterBinaryFunction(framework.Operator_BinaryMinus, jsonb_delete_int32)

@@ -392,6 +392,10 @@ func (s *scanner) scan(lval *sqlSymType) {
 
 	case '@':
 		switch s.peek() {
+		case '?': // @?
+			s.pos++
+			lval.id = JSON_PATH_EXISTS
+			return
 		case '>': // @>
 			s.pos++
 			lval.id = CONTAINS
