@@ -34,6 +34,7 @@ func initJsonB() {
 	framework.RegisterFunction(jsonb_cmp)
 	framework.RegisterFunction(jsonb_build_array)
 	framework.RegisterFunction(jsonb_build_object)
+	framework.RegisterFunction(jsonb_path_query_first_jsonb_text)
 
 }
 

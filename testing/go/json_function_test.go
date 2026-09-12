@@ -1238,6 +1238,78 @@ func TestJsonObjectKeys(t *testing.T) {
 	})
 }
 
+func TestJsonbPathQueryFirstCompatibility(t *testing.T) {
+	RunScripts(t, []ScriptTest{
+		{
+			Name: "root returns the complete JSONB value",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_first('[1,2]'::jsonb, '$');`, Expected: []sql.Row{{`[1, 2]`}}},
+				{Query: `SELECT jsonb_path_query_first('null'::jsonb, '$');`, Expected: []sql.Row{{nil}}},
+				{Query: `SELECT jsonb_path_query_first('null'::jsonb, '$') IS NULL;`, Expected: []sql.Row{{"f"}}},
+				{Query: `SELECT jsonb_path_query_first(NULL::jsonb, '$');`, Expected: []sql.Row{{nil}}},
+				{Query: `SELECT jsonb_path_query_first('{"a":1}'::jsonb, NULL::text);`, Expected: []sql.Row{{nil}}},
+				{Query: `SELECT jsonb_path_query_first('{"a":1}'::jsonb, 'strict $');`, Expected: []sql.Row{{`{"a": 1}`}}},
+			},
+		},
+		{
+			Name: "object wildcard follows JSONB key order",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_first('{"aa":1,"z":2}'::jsonb, '$.*');`, Expected: []sql.Row{{`2`}}},
+				{Query: `SELECT jsonb_path_query_first('{"b":2,"a":1}'::jsonb, '$.*');`, Expected: []sql.Row{{`1`}}},
+				{Query: `SELECT jsonb_path_query_first('{"é":1,"aa":2}'::jsonb, '$.*');`, Expected: []sql.Row{{`2`}}},
+				{Query: `SELECT jsonb_path_query_first('{"a":[1,2]}'::jsonb, '$.*');`, Expected: []sql.Row{{`[1, 2]`}}},
+				{Query: `SELECT jsonb_path_query_first('{}'::jsonb, '$.*') IS NULL;`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT jsonb_path_query_first('{"a":null}'::jsonb, '$.*') IS NULL;`, Expected: []sql.Row{{"f"}}},
+			},
+		},
+		{
+			Name: "lax object wildcard unwraps one array level",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_first('[1,{},null,{"z":2}]'::jsonb, '$.*');`, Expected: []sql.Row{{`2`}}},
+				{Query: `SELECT jsonb_path_query_first('[[],{"a":3}]'::jsonb, 'lax $.*');`, Expected: []sql.Row{{`3`}}},
+				{Query: `SELECT jsonb_path_query_first('[1,2]'::jsonb, '$.*') IS NULL;`, Expected: []sql.Row{{"t"}}},
+				{Query: `SELECT jsonb_path_query_first('null'::jsonb, '$.*') IS NULL;`, Expected: []sql.Row{{"t"}}},
+			},
+		},
+		{
+			Name: "stored JSONB value",
+			SetUpScript: []string{
+				`CREATE TABLE jsonpath_docs (id int PRIMARY KEY, doc jsonb);`,
+				`INSERT INTO jsonpath_docs VALUES (1, '{"aa":1,"z":2}');`,
+			},
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT jsonb_path_query_first(doc, '$.*') FROM jsonpath_docs WHERE id = 1;`, Expected: []sql.Row{{`2`}}},
+			},
+		},
+		{
+			Name: "Odoo-shaped JSONB expression",
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:    `SELECT COALESCE(jsonb_path_query_first('{"fr_FR":"Euros"}'::jsonb, '$.*'), '"fallback"'::jsonb);`,
+					Expected: []sql.Row{{`"Euros"`}},
+				},
+			},
+		},
+		{
+			Name: "strict wildcard and unsupported paths return explicit errors",
+			Assertions: []ScriptTestAssertion{
+				{
+					Query:       `SELECT jsonb_path_query_first('[{"a":1}]'::jsonb, 'strict $.*');`,
+					ExpectedErr: "wildcard member accessor can only be applied to an object",
+				},
+				{
+					Query:       `SELECT jsonb_path_query_first('{"a":1}'::jsonb, '$.a');`,
+					ExpectedErr: "compatibility overload does not support path",
+				},
+				{
+					Query:       `SELECT jsonb_path_query_first('[1]'::jsonb, '$[*]');`,
+					ExpectedErr: "compatibility overload does not support path",
+				},
+			},
+		},
+	})
+}
+
 // TestJsonStripNulls exercises json_strip_nulls and jsonb_strip_nulls, which
 // recursively drop object fields whose value is JSON null.
 func TestJsonStripNulls(t *testing.T) {
