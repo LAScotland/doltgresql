@@ -456,6 +456,78 @@ func TestImplicitTransactionsSimpleProtocol(t *testing.T) {
 			},
 		},
 		{
+			Name:        "DDL remains transactional in an explicit transaction block",
+			SetUpScript: setup,
+			Steps: []FlowStep{
+				SimpleQuery{
+					Query:               "BEGIN; INSERT INTO mytable VALUES (1); CREATE TABLE created_in_transaction (i BIGINT); ALTER TABLE mytable ADD COLUMN rolled_back_column BIGINT;",
+					Expected:            []StatementResult{{Tag: "BEGIN"}, {Tag: "INSERT 0 1"}, {Tag: "CREATE TABLE"}, {Tag: "ALTER TABLE"}},
+					ExpectedReadyStatus: 'T',
+				},
+				SimpleQuery{
+					Query:    "ROLLBACK;",
+					Expected: []StatementResult{{Tag: "ROLLBACK"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM mytable;",
+					Expected: [][]string{{"0"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM information_schema.tables WHERE table_name = 'created_in_transaction';",
+					Expected: [][]string{{"0"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM information_schema.columns WHERE table_name = 'mytable' AND column_name = 'rolled_back_column';",
+					Expected: [][]string{{"0"}},
+				},
+			},
+		},
+		{
+			Name:        "DDL rolls back to a savepoint without discarding earlier work",
+			SetUpScript: setup,
+			Steps: []FlowStep{
+				SimpleQuery{
+					Query:    "BEGIN; INSERT INTO mytable VALUES (1); SAVEPOINT before_ddl; CREATE TABLE rolled_back_to_savepoint (i BIGINT); ALTER TABLE mytable ADD COLUMN rolled_back_to_savepoint BIGINT; ROLLBACK TO SAVEPOINT before_ddl; RELEASE SAVEPOINT before_ddl; COMMIT;",
+					Expected: []StatementResult{{Tag: "BEGIN"}, {Tag: "INSERT 0 1"}, {Tag: "SAVEPOINT"}, {Tag: "CREATE TABLE"}, {Tag: "ALTER TABLE"}, {Tag: "ROLLBACK"}, {Tag: "RELEASE"}, {Tag: "COMMIT"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM mytable;",
+					Expected: [][]string{{"1"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM information_schema.tables WHERE table_name = 'rolled_back_to_savepoint';",
+					Expected: [][]string{{"0"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM information_schema.columns WHERE table_name = 'mytable' AND column_name = 'rolled_back_to_savepoint';",
+					Expected: [][]string{{"0"}},
+				},
+			},
+		},
+		{
+			Name:        "DDL does not discard released savepoints and persists on commit",
+			SetUpScript: setup,
+			Steps: []FlowStep{
+				SimpleQuery{
+					Query:               "BEGIN; SAVEPOINT before_ddl; CREATE TABLE created_after_savepoint (i BIGINT); RELEASE SAVEPOINT before_ddl; ALTER TABLE mytable ADD COLUMN added_in_transaction BIGINT;",
+					Expected:            []StatementResult{{Tag: "BEGIN"}, {Tag: "SAVEPOINT"}, {Tag: "CREATE TABLE"}, {Tag: "RELEASE"}, {Tag: "ALTER TABLE"}},
+					ExpectedReadyStatus: 'T',
+				},
+				SimpleQuery{
+					Query:    "COMMIT;",
+					Expected: []StatementResult{{Tag: "COMMIT"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM information_schema.tables WHERE table_name = 'created_after_savepoint';",
+					Expected: [][]string{{"1"}},
+				},
+				QueryOnOtherConnection{
+					Query:    "SELECT count(*) FROM information_schema.columns WHERE table_name = 'mytable' AND column_name = 'added_in_transaction';",
+					Expected: [][]string{{"1"}},
+				},
+			},
+		},
+		{
 			Name:        "savepoints are not allowed in an implicit transaction block",
 			SetUpScript: setup,
 			Steps: []FlowStep{

@@ -35,6 +35,7 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/analyzer"
 	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/dolthub/go-mysql-server/sql/plan"
+	"github.com/dolthub/go-mysql-server/sql/rowexec"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	"github.com/dolthub/vitess/go/mysql"
 	"github.com/dolthub/vitess/go/vt/sqlparser"
@@ -421,6 +422,10 @@ func (h *DoltgresHandler) doQuery(ctx context.Context, c *mysql.Conn, query stri
 		sqlCtx.GetLogger().WithError(err).Warn("error running query")
 		return err
 	}
+	rowIter, err = preserveTransactionalDDL(sqlCtx, qFlags, rowIter)
+	if err != nil {
+		return err
+	}
 
 	// create result before goroutines to avoid |ctx| racing
 	var r *Result
@@ -466,6 +471,36 @@ func (h *DoltgresHandler) doQuery(ctx context.Context, c *mysql.Conn, query stri
 	}
 
 	return callback(sqlCtx, r)
+}
+
+// preserveTransactionalDDL removes go-mysql-server's MySQL-specific implicit
+// commit around DDL when Doltgres is already executing inside a transaction
+// block. The query flags remain intact for analysis, validation, and privilege
+// checks; only the final transaction policy differs between the dialects.
+func preserveTransactionalDDL(ctx *sql.Context, qFlags *sql.QueryFlags, iter sql.RowIter) (sql.RowIter, error) {
+	if !ctx.GetIgnoreAutoCommit() || qFlags == nil ||
+		(!qFlags.IsSet(sql.QFlagDDL) && !qFlags.IsSet(sql.QFlagAlterTable)) {
+		return iter, nil
+	}
+
+	switch i := iter.(type) {
+	case *rowexec.ExprCloserIter:
+		child, err := preserveTransactionalDDL(ctx, qFlags, i.GetIter())
+		if err != nil {
+			return nil, err
+		}
+		return i.WithChildIter(child), nil
+	case *plan.TrackedRowIter:
+		child, err := preserveTransactionalDDL(ctx, qFlags, i.GetIter())
+		if err != nil {
+			return nil, err
+		}
+		return i.WithChildIter(child), nil
+	case *rowexec.TransactionCommittingIter:
+		return i.GetIter(), nil
+	default:
+		return nil, errors.Errorf("cannot preserve transactional DDL through unexpected iterator %T", iter)
+	}
 }
 
 // QueryExecutor is a function that executes a query and returns the result as a schema and iterator. Either of
