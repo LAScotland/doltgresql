@@ -71,7 +71,9 @@ func initJson() {
 	framework.RegisterFunction(json_recv)
 	framework.RegisterFunction(json_send)
 	framework.RegisterFunction(json_build_array)
+	framework.RegisterFunction(json_build_array_empty)
 	framework.RegisterFunction(json_build_object)
+	framework.RegisterFunction(json_build_object_empty)
 }
 
 // json_in represents the PostgreSQL function of json type IO input.
@@ -307,4 +309,22 @@ func buildJsonObject(ctx *sql.Context, fnName string, _ [2]*pgtypes.DoltgresType
 	}
 
 	return types.JSONDocument{Val: jsonObject}, nil
+}
+
+// json_build_array_empty implements the zero-argument constructor without changing variadic resolution.
+var json_build_array_empty = framework.Function0{
+	Name:   "json_build_array",
+	Return: pgtypes.Json,
+	Callable: func(ctx *sql.Context) (any, error) {
+		return types.JSONDocument{Val: []any{}}, nil
+	},
+}
+
+// json_build_object_empty implements the zero-argument constructor without changing variadic resolution.
+var json_build_object_empty = framework.Function0{
+	Name:   "json_build_object",
+	Return: pgtypes.Json,
+	Callable: func(ctx *sql.Context) (any, error) {
+		return types.JSONDocument{Val: map[string]any{}}, nil
+	},
 }

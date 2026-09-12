@@ -2196,7 +2196,6 @@ func TestJsonFunctions(t *testing.T) {
 				},
 				{
 					Query:            `SELECT json_build_array();`,
-					Skip:             true, // variadic functions can't handle 0 arguments right now
 					ExpectedColNames: []string{"json_build_array"},
 					Expected:         []sql.Row{{`[]`}},
 				},
@@ -2260,7 +2259,6 @@ func TestJsonFunctions(t *testing.T) {
 				},
 				{
 					Query:            `SELECT jsonb_build_array();`,
-					Skip:             true, // variadic functions can't handle 0 arguments right now
 					ExpectedColNames: []string{"jsonb_build_array"},
 					Expected:         []sql.Row{{`[]`}},
 				},

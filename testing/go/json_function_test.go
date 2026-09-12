@@ -1513,3 +1513,11 @@ func TestJsonInspectionStoredValues(t *testing.T) {
 		},
 	})
 }
+
+func TestJsonEmptyConstructors(t *testing.T) {
+	RunScripts(t, []ScriptTest{{Name: "empty constructors preserve JSON type", Assertions: []ScriptTestAssertion{
+		{Query: `SELECT json_build_object(), jsonb_build_object();`, Expected: []sql.Row{{`{}`, `{}`}}},
+		{Query: `SELECT json_typeof(json_build_array()), jsonb_typeof(jsonb_build_array()), json_typeof(json_build_object()), jsonb_typeof(jsonb_build_object());`, Expected: []sql.Row{{"array", "array", "object", "object"}}},
+		{Query: `SELECT jsonb_build_array(jsonb_build_object(), jsonb_build_array());`, Expected: []sql.Row{{`[{}, []]`}}},
+	}}})
+}

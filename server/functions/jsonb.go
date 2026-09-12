@@ -33,7 +33,9 @@ func initJsonB() {
 	framework.RegisterFunction(jsonb_send)
 	framework.RegisterFunction(jsonb_cmp)
 	framework.RegisterFunction(jsonb_build_array)
+	framework.RegisterFunction(jsonb_build_array_empty)
 	framework.RegisterFunction(jsonb_build_object)
+	framework.RegisterFunction(jsonb_build_object_empty)
 	framework.RegisterFunction(jsonb_path_query_first_jsonb_text)
 
 }
@@ -138,4 +140,22 @@ var jsonb_build_object = framework.Function1{
 	Parameters: [1]*pgtypes.DoltgresType{pgtypes.AnyArray},
 	Variadic:   true,
 	Callable:   json_build_object_callable,
+}
+
+// jsonb_build_array_empty implements the zero-argument constructor without changing variadic resolution.
+var jsonb_build_array_empty = framework.Function0{
+	Name:   "jsonb_build_array",
+	Return: pgtypes.JsonB,
+	Callable: func(ctx *sql.Context) (any, error) {
+		return types.JSONDocument{Val: []any{}}, nil
+	},
+}
+
+// jsonb_build_object_empty implements the zero-argument constructor without changing variadic resolution.
+var jsonb_build_object_empty = framework.Function0{
+	Name:   "jsonb_build_object",
+	Return: pgtypes.JsonB,
+	Callable: func(ctx *sql.Context) (any, error) {
+		return types.JSONDocument{Val: map[string]any{}}, nil
+	},
 }
