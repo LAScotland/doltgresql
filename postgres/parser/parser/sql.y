@@ -1338,7 +1338,7 @@ func (u *sqlSymUnion) vacuumTableAndColsList() tree.VacuumTableAndColsList {
 %type <tree.Expr> rowsfrom_item
 %type <tree.TableExpr> joined_table
 %type <*tree.UnresolvedObjectName> relation_expr
-%type <tree.TableExpr> table_expr_opt_alias_idx table_name_opt_idx
+%type <tree.TableExpr> table_expr_opt_alias_idx table_name_opt_idx relation_expr_opt_alias_idx
 %type <tree.SelectExpr> target_elem
 %type <*tree.UpdateExpr> single_set_clause
 %type <tree.AsOfClause> as_of_clause opt_as_of_clause
@@ -5228,7 +5228,7 @@ opt_changefeed_sink:
 //               [RETURNING <exprs...>]
 // %SeeAlso: WEBDOCS/delete.html
 delete_stmt:
-  opt_with_clause DELETE FROM table_expr_opt_alias_idx opt_using_clause opt_where_clause opt_sort_clause opt_limit_clause returning_clause
+  opt_with_clause DELETE FROM relation_expr_opt_alias_idx opt_using_clause opt_where_clause opt_sort_clause opt_limit_clause returning_clause
   {
     $$.val = &tree.Delete{
       With: $1.with(),
@@ -10758,7 +10758,7 @@ returning_clause:
 //        [RETURNING <exprs...>]
 // %SeeAlso: INSERT, UPSERT, DELETE, WEBDOCS/update.html
 update_stmt:
-  opt_with_clause UPDATE table_expr_opt_alias_idx
+  opt_with_clause UPDATE relation_expr_opt_alias_idx
     SET set_clause_list opt_from_list opt_where_clause opt_sort_clause opt_limit_clause returning_clause
   {
     $$.val = &tree.Update{
@@ -11990,9 +11990,9 @@ join_qual:
 relation_expr:
   table_name              { $$.val = $1.unresolvedObjectName() }
 | table_name '*'          { $$.val = $1.unresolvedObjectName() }
-| ONLY table_name         { $$.val = $2.unresolvedObjectName() }
-| ONLY table_name '*'     { $$.val = $2.unresolvedObjectName() }
-| ONLY '(' table_name ')' { $$.val = $3.unresolvedObjectName() }
+| ONLY table_name         { name := $2.unresolvedObjectName(); name.ExplicitOnly = true; $$.val = name }
+| ONLY table_name '*'     { name := $2.unresolvedObjectName(); name.ExplicitOnly = true; $$.val = name }
+| ONLY '(' table_name ')' { name := $3.unresolvedObjectName(); name.ExplicitOnly = true; $$.val = name }
 
 relation_expr_list:
   relation_expr
@@ -12036,6 +12036,27 @@ table_expr_opt_alias_idx:
     $$.val = &tree.AliasedTableExpr{
       Expr: $1.tblExpr(),
       IndexFlags: $2.indexFlags(),
+    }
+  }
+
+relation_expr_opt_alias_idx:
+  relation_expr opt_index_flags %prec UMINUS
+  {
+    name := $1.unresolvedObjectName().ToTableName()
+    $$.val = &tree.AliasedTableExpr{Expr: &name, IndexFlags: $2.indexFlags()}
+  }
+| relation_expr opt_index_flags table_alias_name
+  {
+    name := $1.unresolvedObjectName().ToTableName()
+    $$.val = &tree.AliasedTableExpr{
+      Expr: &name, IndexFlags: $2.indexFlags(), As: tree.AliasClause{Alias: tree.Name($3)},
+    }
+  }
+| relation_expr opt_index_flags AS table_alias_name
+  {
+    name := $1.unresolvedObjectName().ToTableName()
+    $$.val = &tree.AliasedTableExpr{
+      Expr: &name, IndexFlags: $2.indexFlags(), As: tree.AliasClause{Alias: tree.Name($4)},
     }
   }
 

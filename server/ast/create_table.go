@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/dolthub/go-mysql-server/sql"
 
 	vitess "github.com/dolthub/vitess/go/vt/sqlparser"
 
@@ -121,6 +122,14 @@ func nodeCreateTable(ctx *Context, node *tree.CreateTable) (*vitess.DDL, error) 
 		if err != nil {
 			return nil, err
 		}
+		childColumns := make([]InheritsColumn, 0, len(ddl.TableSpec.Columns))
+		for _, column := range ddl.TableSpec.Columns {
+			columnType, ok := column.Type.ResolvedType.(sql.Type)
+			if !ok {
+				return nil, errors.Errorf("unresolved inherited child column type for %q", column.Name.String())
+			}
+			childColumns = append(childColumns, InheritsColumn{Name: column.Name.String(), Type: columnType})
+		}
 		ddl.TableSpec.AddColumn(&vitess.ColumnDefinition{
 			Name: vitess.NewColIdent(markerName),
 			Type: vitess.ColumnType{
@@ -128,6 +137,9 @@ func nodeCreateTable(ctx *Context, node *tree.CreateTable) (*vitess.DDL, error) 
 				Type:         "int4",
 				Default: vitess.InjectedExpr{Expression: &InheritsMetadata{
 					PrimaryKeyColumns: inheritedTablePrimaryKeyColumns(node.Defs),
+					Parents:           inheritanceParentNames(optLike.LikeTables),
+					TargetName:        string(node.Table.ObjectName),
+					ChildColumns:      childColumns,
 				}},
 			},
 		})
@@ -216,4 +228,12 @@ func validateInheritedChildConstraints(defs tree.TableDefs) error {
 		}
 	}
 	return nil
+}
+
+func inheritanceParentNames(tables []vitess.TableName) []InheritsParent {
+	parents := make([]InheritsParent, len(tables))
+	for i, t := range tables {
+		parents[i] = InheritsParent{Database: t.DbQualifier.String(), Schema: t.SchemaQualifier.String(), Name: t.Name.String()}
+	}
+	return parents
 }

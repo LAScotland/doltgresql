@@ -179,6 +179,9 @@ func (a *AlterTableColumnTypeUsing) RowIter(ctx *sql.Context, r sql.Row) (sql.Ro
 
 	// Reject the type change if this table's implicit row type is used as a column type anywhere else.
 	if doltTable := core.SQLTableToDoltTable(tbl); doltTable != nil {
+		if err := hook.RejectInheritedColumnMutation(ctx, "alter the type of", oldCol.Name, doltTable.TableName()); err != nil {
+			return nil, err
+		}
 		if err := hook.ValidateColumnTypeChangeForTable(ctx, doltTable.TableName()); err != nil {
 			return nil, err
 		}

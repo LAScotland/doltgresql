@@ -31,6 +31,7 @@ import (
 	"github.com/dolthub/doltgresql/core/casts"
 	"github.com/dolthub/doltgresql/core/extensions"
 	"github.com/dolthub/doltgresql/core/functions"
+	"github.com/dolthub/doltgresql/core/inheritance"
 	"github.com/dolthub/doltgresql/core/operators"
 	"github.com/dolthub/doltgresql/core/procedures"
 	"github.com/dolthub/doltgresql/core/rootobject"
@@ -444,6 +445,15 @@ func GetAggregatesCollectionFromContext(ctx *sql.Context, database string) (*agg
 		return nil, err
 	}
 	return coll.(*aggregates.Collection), nil
+}
+
+// GetInheritanceCollectionFromContext returns a database's durable table-inheritance graph.
+func GetInheritanceCollectionFromContext(ctx *sql.Context, database string) (*inheritance.Collection, error) {
+	coll, err := collectionFromContext(ctx, database, objinterface.RootObjectID_Inheritance)
+	if err != nil {
+		return nil, err
+	}
+	return coll.(*inheritance.Collection), nil
 }
 
 // GetOperatorsCollectionFromContext returns the given operators collection from the context.

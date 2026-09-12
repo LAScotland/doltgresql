@@ -27,6 +27,29 @@ import (
 	pgtypes "github.com/dolthub/doltgresql/server/types"
 )
 
+// BeforeTableRename rejects renaming inheritance graph participants until metadata and inherited row semantics can be
+// updated atomically with the table rename.
+func BeforeTableRename(ctx *sql.Context, runner sql.StatementRunner, nodeInterface sql.Node) (sql.Node, error) {
+	n, ok := nodeInterface.(*plan.RenameTable)
+	if !ok {
+		return nil, errors.Errorf("RENAME TABLE pre-hook expected `*plan.RenameTable` but received `%T`", nodeInterface)
+	}
+	for _, oldName := range n.OldNames {
+		sqlTable, exists := n.TableExists(ctx, oldName)
+		if !exists {
+			continue
+		}
+		doltTable := core.SQLTableToDoltTable(sqlTable)
+		if doltTable == nil {
+			continue
+		}
+		if err := rejectInheritanceTableMutation(ctx, "rename", doltTable.TableName()); err != nil {
+			return nil, err
+		}
+	}
+	return n, nil
+}
+
 // AfterTableRename handles updating various columns using the table type, alongside other validation that's unique
 // to Doltgres.
 func AfterTableRename(ctx *sql.Context, runner sql.StatementRunner, nodeInterface sql.Node) error {

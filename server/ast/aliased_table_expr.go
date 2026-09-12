@@ -43,11 +43,30 @@ func nodeAliasedTableExpr(ctx *Context, node *tree.AliasedTableExpr) (*vitess.Al
 		if err != nil {
 			return nil, err
 		}
-		aliasExpr = tableName
-		authInfo = vitess.AuthInformation{
+		tableAuth := vitess.AuthInformation{
 			AuthType:    ctx.Auth().PeekAuthType(),
 			TargetType:  auth.AuthTargetType_TableIdentifiers,
 			TargetNames: []string{tableName.DbQualifier.String(), tableName.SchemaQualifier.String(), tableName.Name.String()},
+		}
+		if expr.ExplicitOnly {
+			// Vitess has no table-expression metadata hook. Use a typed filter in
+			// a derived SELECT so GMS resolves the base scan and preserves its
+			// authorization target. The inheritance analyzer consumes this marker
+			// before optimization; SQL text cannot construct the marker type.
+			aliasExpr = &vitess.Subquery{Select: &vitess.Select{
+				SelectExprs: vitess.SelectExprs{&vitess.StarExpr{}},
+				From: vitess.TableExprs{&vitess.AliasedTableExpr{
+					Expr: tableName,
+					Auth: tableAuth,
+				}},
+				Where: &vitess.Where{
+					Type: vitess.WhereStr,
+					Expr: vitess.InjectedExpr{Expression: &OnlyTableMarker{}},
+				},
+			}}
+		} else {
+			aliasExpr = tableName
+			authInfo = tableAuth
 		}
 	case *tree.Subquery:
 		tableExpr, err := nodeTableExpr(ctx, expr)
@@ -163,6 +182,11 @@ func nodeAliasedTableExpr(ctx *Context, node *tree.AliasedTableExpr) (*vitess.Al
 		return nil, errors.Errorf("unhandled table expression: `%T`", expr)
 	}
 	alias := string(node.As.Alias)
+	if alias == "" {
+		if tableName, ok := node.Expr.(*tree.TableName); ok && tableName.ExplicitOnly {
+			alias = tableName.Table()
+		}
+	}
 	if alias == "" && node.Ordinality {
 		// A derived table needs an alias; the implicit alias of a function called in FROM is the
 		// function's name, matching Postgres

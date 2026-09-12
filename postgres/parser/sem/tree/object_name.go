@@ -124,6 +124,10 @@ type UnresolvedObjectName struct {
 	// (the number of parts specified) is populated in NumParts above.
 	Parts [3]string
 
+	// ExplicitOnly is set when this name came from an ONLY relation expression.
+	// It is relation syntax metadata, not part of object identity.
+	ExplicitOnly bool
+
 	// UnresolvedObjectName can be annotated with a *tree.TableName.
 	AnnotatedNode
 }
@@ -172,6 +176,9 @@ func (u *UnresolvedObjectName) Resolved(ann *Annotations) ObjectName {
 
 // Format implements the NodeFormatter interface.
 func (u *UnresolvedObjectName) Format(ctx *FmtCtx) {
+	if u.ExplicitOnly {
+		ctx.WriteString("ONLY ")
+	}
 	// If we want to format the corresponding resolved name, look it up in the
 	// annotation.
 	if ctx.HasFlags(FmtAlwaysQualifyTableNames) || ctx.tableNameFormatter != nil {
@@ -217,7 +224,7 @@ func (u *UnresolvedObjectName) UnquotedString() string {
 // would only figure that out during name resolution. This method is temporary,
 // while we change all the code paths to only use TableName after resolution.
 func (u *UnresolvedObjectName) ToTableName() TableName {
-	return TableName{objName{
+	return TableName{objName: objName{
 		ObjectName: Name(u.Parts[0]),
 		ObjectNamePrefix: ObjectNamePrefix{
 			SchemaName:      Name(u.Parts[1]),
@@ -225,7 +232,7 @@ func (u *UnresolvedObjectName) ToTableName() TableName {
 			ExplicitSchema:  u.NumParts >= 2,
 			ExplicitCatalog: u.NumParts >= 3,
 		},
-	}}
+	}, ExplicitOnly: u.ExplicitOnly}
 }
 
 // ToUnresolvedName converts the unresolved object name to the more general

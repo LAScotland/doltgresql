@@ -62,6 +62,7 @@ const (
 	Section_User                 Section = 37 // Refers to users
 	Section_View                 Section = 38 // Refers to views
 	Section_Tablespace           Section = 39 // Refers to tablespaces
+	Section_Inheritance          Section = 40 // Refers to table inheritance metadata
 
 	section_count uint8 = 40 // This is the number of sections, and should ALWAYS be kept up-to-date
 )

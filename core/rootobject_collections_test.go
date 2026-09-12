@@ -29,6 +29,7 @@ import (
 
 	"github.com/dolthub/doltgresql/core/casts"
 	"github.com/dolthub/doltgresql/core/id"
+	"github.com/dolthub/doltgresql/core/inheritance"
 	"github.com/dolthub/doltgresql/core/rootobject"
 	"github.com/dolthub/doltgresql/core/rootobject/objinterface"
 	"github.com/dolthub/doltgresql/core/sequences"
@@ -112,6 +113,22 @@ func TestEmptiedCollectionMatchesUnwrittenCollection(t *testing.T) {
 	emptiedHash, err := emptied.HashOf()
 	require.NoError(t, err)
 	require.Equal(t, startHash, emptiedHash)
+}
+
+func TestInheritanceCollectionPersistsInRoot(t *testing.T) {
+	ctx := context.Background()
+	root := newTestRootWithSchema(t, ctx)
+	coll, err := inheritance.LoadCollection(ctx, root)
+	require.NoError(t, err)
+	child := id.NewTable("public", "child")
+	parents := []id.Table{id.NewTable("public", "p1"), id.NewTable("other", "p2")}
+	require.NoError(t, coll.SetParents(ctx, child, parents))
+	updated, err := coll.UpdateRoot(ctx, root)
+	require.NoError(t, err)
+	reloaded, err := inheritance.LoadCollection(ctx, updated)
+	require.NoError(t, err)
+	require.Equal(t, parents, reloaded.GetParents(ctx, child))
+	require.False(t, reloaded.IsStale(ctx, updated))
 }
 
 func TestCollectionStaleness(t *testing.T) {

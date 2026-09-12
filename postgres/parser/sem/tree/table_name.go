@@ -38,6 +38,9 @@ package tree
 // non-default value; this encourages the use of the constructors below.
 type TableName struct {
 	objName
+	// ExplicitOnly is true when ONLY was specified in a relation expression.
+	// It does not participate in the table's qualified object identity.
+	ExplicitOnly bool
 }
 
 // Format implements the NodeFormatter interface.
@@ -45,6 +48,9 @@ func (t *TableName) Format(ctx *FmtCtx) {
 	if ctx.tableNameFormatter != nil {
 		ctx.tableNameFormatter(ctx, t)
 		return
+	}
+	if t.ExplicitOnly {
+		ctx.WriteString("ONLY ")
 	}
 	t.ObjectNamePrefix.Format(ctx)
 	if t.ExplicitSchema || ctx.alwaysFormatTablePrefix() {
@@ -76,7 +82,7 @@ func (t *TableName) Table() string {
 // Equals returns true if the two table names are identical (including
 // the ExplicitSchema/ExplicitCatalog flags).
 func (t *TableName) Equals(other *TableName) bool {
-	return *t == *other
+	return t.objName == other.objName
 }
 
 // tableExpr implements the TableExpr interface.
@@ -84,7 +90,7 @@ func (*TableName) tableExpr() {}
 
 // MakeTableName creates a new table name qualified with just a schema.
 func MakeTableName(db, tbl Name) TableName {
-	return TableName{objName{
+	return TableName{objName: objName{
 		ObjectName: tbl,
 		ObjectNamePrefix: ObjectNamePrefix{
 			CatalogName:     db,
@@ -104,7 +110,7 @@ func NewTableName(db, tbl Name) *TableName {
 
 // MakeTableNameWithSchema creates a new fully qualified table name.
 func MakeTableNameWithSchema(db, schema, tbl Name) TableName {
-	return TableName{objName{
+	return TableName{objName: objName{
 		ObjectName: tbl,
 		ObjectNamePrefix: ObjectNamePrefix{
 			CatalogName:     db,
@@ -118,7 +124,7 @@ func MakeTableNameWithSchema(db, schema, tbl Name) TableName {
 // MakeTableNameFromPrefix creates a table name from an unqualified name
 // and a resolved prefix.
 func MakeTableNameFromPrefix(prefix ObjectNamePrefix, object Name) TableName {
-	return TableName{objName{
+	return TableName{objName: objName{
 		ObjectName:       object,
 		ObjectNamePrefix: prefix,
 	}}
@@ -126,7 +132,7 @@ func MakeTableNameFromPrefix(prefix ObjectNamePrefix, object Name) TableName {
 
 // MakeUnqualifiedTableName creates a new base table name.
 func MakeUnqualifiedTableName(tbl Name) TableName {
-	return TableName{objName{
+	return TableName{objName: objName{
 		ObjectName: tbl,
 	}}
 }
@@ -138,7 +144,7 @@ func NewUnqualifiedTableName(tbl Name) *TableName {
 }
 
 func makeTableNameFromUnresolvedName(n *UnresolvedName) TableName {
-	return TableName{objName{
+	return TableName{objName: objName{
 		ObjectName:       Name(n.Parts[0]),
 		ObjectNamePrefix: makeObjectNamePrefixFromUnresolvedName(n),
 	}}

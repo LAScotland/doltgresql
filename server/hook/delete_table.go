@@ -47,6 +47,11 @@ func BeforeTableDeletion(ctx *sql.Context, runner sql.StatementRunner, nodeInter
 		resolvedTables = append(resolvedTables, doltTable)
 		allTableNames = append(allTableNames, doltTable.TableName())
 	}
+	for _, tableName := range allTableNames {
+		if err := rejectInheritanceTableMutation(ctx, "drop", tableName); err != nil {
+			return nil, err
+		}
+	}
 	if n.Cascade {
 		// CASCADE drops the objects that depend on the dropped tables before the standard drop path runs.
 		if err := cascadeDropDependencies(ctx, runner, allTableNames); err != nil {

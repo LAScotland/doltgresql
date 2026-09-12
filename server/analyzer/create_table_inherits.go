@@ -18,6 +18,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dolthub/dolt/go/libraries/doltcore/doltdb"
+	"github.com/dolthub/doltgresql/core"
+	"github.com/dolthub/doltgresql/core/id"
+
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/analyzer"
 	"github.com/dolthub/go-mysql-server/sql/plan"
@@ -30,8 +34,8 @@ import (
 // PostgreSQL AST conversion and prevents GMS's CREATE TABLE LIKE behaviour from
 // copying parent primary keys and indexes. PostgreSQL INHERITS retains column
 // properties such as defaults and NOT NULL, but a child owns only keys it
-// declares itself. This does not implement inherited row visibility.
-func normalizeCreateTableInherits(_ *sql.Context, _ *analyzer.Analyzer, n sql.Node, _ *plan.Scope, _ analyzer.RuleSelector, _ *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
+// declares itself. Row visibility is handled by expandInheritedTables.
+func normalizeCreateTableInherits(ctx *sql.Context, _ *analyzer.Analyzer, n sql.Node, _ *plan.Scope, _ analyzer.RuleSelector, _ *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
 	ct, ok := n.(*plan.CreateTable)
 	if !ok {
 		return n, transform.SameTree, nil
@@ -54,6 +58,76 @@ func normalizeCreateTableInherits(_ *sql.Context, _ *analyzer.Analyzer, n sql.No
 		return n, transform.SameTree, nil
 	}
 
+	parents := make(pgast.ResolvedInheritanceParents, 0, len(metadata.Parents))
+	seenParents := make(map[id.Table]bool)
+	type inheritedColumn struct {
+		name string
+		typ  sql.Type
+	}
+	columnTypes := make(map[string]inheritedColumn)
+	for _, column := range metadata.ChildColumns {
+		columnTypes[strings.ToLower(column.Name)] = inheritedColumn{name: column.Name, typ: column.Type}
+	}
+	for _, parent := range metadata.Parents {
+		if parent.Database != "" && parent.Database != ctx.GetCurrentDatabase() {
+			return nil, transform.SameTree, fmt.Errorf("cross-database inheritance is not supported")
+		}
+		schemas := []string{parent.Schema}
+		if parent.Schema == "" {
+			var err error
+			schemas, err = core.SearchPath(ctx)
+			if err != nil {
+				return nil, transform.SameTree, err
+			}
+		}
+		found := false
+		for _, schemaName := range schemas {
+			table, err := core.GetSqlTableFromContext(ctx, "", doltdb.TableName{Name: parent.Name, Schema: schemaName})
+			if err != nil {
+				return nil, transform.SameTree, err
+			}
+			if table == nil {
+				continue
+			}
+			parentID, ok, err := id.GetFromTable(ctx, table)
+			if err != nil {
+				return nil, transform.SameTree, err
+			}
+			if !ok {
+				return nil, transform.SameTree, fmt.Errorf("inheritance requires a durable table")
+			}
+			if seenParents[parentID] {
+				return nil, transform.SameTree, fmt.Errorf("relation %q would be inherited from more than once", parent.Name)
+			}
+			for _, column := range table.Schema(ctx) {
+				key := strings.ToLower(column.Name)
+				if existing, ok := columnTypes[key]; ok {
+					if existing.name != column.Name {
+						return nil, transform.SameTree, fmt.Errorf("inherited columns %q and %q differ only by case", existing.name, column.Name)
+					}
+					if !existing.typ.Equals(column.Type) {
+						return nil, transform.SameTree, fmt.Errorf("inherited column %q has incompatible types", column.Name)
+					}
+				}
+				columnTypes[key] = inheritedColumn{name: column.Name, typ: column.Type}
+			}
+			seenParents[parentID] = true
+			parents = append(parents, parentID)
+			found = true
+			break
+		}
+		if !found {
+			return nil, transform.SameTree, fmt.Errorf("inheritance parent %q does not exist", parent.Name)
+		}
+	}
+	if ct.Temporary() && len(parents) > 0 {
+		return nil, transform.SameTree, fmt.Errorf("temporary table inheritance is not supported")
+	}
+	options := make(map[string]interface{}, len(ct.TableOpts)+1)
+	for k, v := range ct.TableOpts {
+		options[k] = v
+	}
+	options[pgast.InheritanceTableOption] = parents
 	schema := make(sql.Schema, 0, len(pkSchema.Schema)-1)
 	for i, column := range pkSchema.Schema {
 		if i == markerOrdinal {
@@ -87,13 +161,17 @@ func normalizeCreateTableInherits(_ *sql.Context, _ *analyzer.Analyzer, n sql.No
 		}
 	}
 
-	clean := plan.NewCreateTable(ct.Db, ct.Name(), ct.IfNotExists(), ct.Temporary(), &plan.TableSpec{
+	targetName := metadata.TargetName
+	if targetName == "" {
+		targetName = ct.Name()
+	}
+	clean := plan.NewCreateTable(ct.Db, targetName, ct.IfNotExists(), ct.Temporary(), &plan.TableSpec{
 		Schema:    sql.NewPrimaryKeySchema(schema, ordinals...),
 		FkDefs:    ct.ForeignKeys(),
 		ChDefs:    ct.Checks(),
 		IdxDefs:   nil,
 		Collation: ct.Collation,
-		TableOpts: ct.TableOpts,
+		TableOpts: options,
 	})
 	if len(ct.ParentForeignKeyTables()) > 0 {
 		var err error

@@ -58,6 +58,8 @@ const (
 	ruleId_ResolveTableForDDL                                            // resolveTableForDDL
 	ruleId_AddLikePrefixRanges                                           // addLikePrefixRanges
 	ruleId_NormalizeCreateTableInherits                                  // normalizeCreateTableInherits
+	ruleId_ExpandInheritedTables
+	ruleId_ValidateInheritedTableMutations
 )
 
 // Init adds additional rules to the analyzer to handle Doltgres-specific functionality.
@@ -65,6 +67,7 @@ func Init() {
 	// OnceBeforeDefault runs before AlwaysBeforeDefault in GMS
 	analyzer.OnceBeforeDefault = append([]analyzer.Rule{
 		{Id: ruleId_NormalizeCreateTableInherits, Apply: normalizeCreateTableInherits},
+		{Id: ruleId_ExpandInheritedTables, Apply: expandInheritedTables},
 		{Id: ruleId_ResolveType, Apply: ResolveType}, // ResolveType rule must run before simplifyFilters rule in GMS
 		{Id: ruleId_AddLikePrefixRanges, Apply: AddLikePrefixRanges},
 		{Id: ruleId_ApplyTablesForAnalyzeAllTables, Apply: applyTablesForAnalyzeAllTables},
@@ -75,6 +78,8 @@ func Init() {
 		analyzer.OnceBeforeDefault...)
 
 	analyzer.AlwaysBeforeDefault = append(analyzer.AlwaysBeforeDefault,
+		// Some GMS DML node batches skip OnceBeforeDefault entirely.
+		analyzer.Rule{Id: ruleId_ValidateInheritedTableMutations, Apply: validateInheritedTableMutations},
 		// ResolveType rule must run in this batch in addition to OnceBeforeDefault batch
 		// because of custom batch set optimization in GMS skipping OnceBeforeDefault batch for some nodes.
 		analyzer.Rule{Id: ruleId_ResolveType, Apply: ResolveType},

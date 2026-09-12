@@ -27,6 +27,9 @@ func nodeUpdate(ctx *Context, node *tree.Update) (update *vitess.Update, err err
 	if node == nil {
 		return nil, nil
 	}
+	if explicitOnlyTable(node.Table) {
+		return nil, errors.Errorf("UPDATE ONLY is not yet supported")
+	}
 	ctx.Auth().PushAuthType(auth.AuthType_UPDATE)
 	defer ctx.Auth().PopAuthType()
 

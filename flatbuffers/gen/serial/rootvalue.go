@@ -531,7 +531,38 @@ func (rcv *RootValue) MutateAggregates(j int, n byte) bool {
 	return false
 }
 
-const RootValueNumFields = 15
+func (rcv *RootValue) Inheritance(j int) byte {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(34))
+	if o != 0 {
+		a := rcv._tab.Vector(o)
+		return rcv._tab.GetByte(a + flatbuffers.UOffsetT(j))
+	}
+	return 0
+}
+func (rcv *RootValue) InheritanceLength() int {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(34))
+	if o != 0 {
+		return rcv._tab.VectorLen(o)
+	}
+	return 0
+}
+func (rcv *RootValue) InheritanceBytes() []byte {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(34))
+	if o != 0 {
+		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+	}
+	return nil
+}
+func (rcv *RootValue) MutateInheritance(j int, n byte) bool {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(34))
+	if o != 0 {
+		a := rcv._tab.Vector(o)
+		return rcv._tab.MutateByte(a+flatbuffers.UOffsetT(j), n)
+	}
+	return false
+}
+
+const RootValueNumFields = 16
 
 func RootValueStart(builder *flatbuffers.Builder) {
 	builder.StartObject(RootValueNumFields)
@@ -618,6 +649,12 @@ func RootValueAddAggregates(builder *flatbuffers.Builder, aggregates flatbuffers
 	builder.PrependUOffsetTSlot(14, flatbuffers.UOffsetT(aggregates), 0)
 }
 func RootValueStartAggregatesVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
+	return builder.StartVector(1, numElems, 1)
+}
+func RootValueAddInheritance(builder *flatbuffers.Builder, inheritance flatbuffers.UOffsetT) {
+	builder.PrependUOffsetTSlot(15, flatbuffers.UOffsetT(inheritance), 0)
+}
+func RootValueStartInheritanceVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
 	return builder.StartVector(1, numElems, 1)
 }
 func RootValueEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {

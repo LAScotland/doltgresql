@@ -40,6 +40,9 @@ func BeforeTableDropColumn(ctx *sql.Context, runner sql.StatementRunner, nodeInt
 		return n, nil
 	}
 	tableName := doltTable.TableName()
+	if err := RejectInheritedColumnMutation(ctx, "drop", n.Column, tableName); err != nil {
+		return nil, err
+	}
 	sqlTable, err := core.GetSqlTableFromContext(ctx, "", tableName)
 	if err != nil {
 		return nil, err

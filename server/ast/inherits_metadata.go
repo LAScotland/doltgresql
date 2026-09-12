@@ -17,6 +17,8 @@ package ast
 import (
 	"context"
 
+	"github.com/dolthub/doltgresql/core/id"
+	"github.com/dolthub/go-mysql-server/sql"
 	gmsexpression "github.com/dolthub/go-mysql-server/sql/expression"
 
 	pgtypes "github.com/dolthub/doltgresql/server/types"
@@ -27,8 +29,27 @@ import (
 // synthetic column and removed by normalizeCreateTableInherits before normal
 // CREATE TABLE validation. This bridge can go away when GMS distinguishes
 // PostgreSQL INHERITS from CREATE TABLE LIKE in its plan API.
+type InheritsParent struct {
+	Database string
+	Schema   string
+	Name     string
+}
+
+// InheritanceTableOption holds typed planner metadata and is removed before execution.
+const InheritanceTableOption = "__doltgres_inheritance_parents"
+
+type ResolvedInheritanceParents []id.Table
+
 type InheritsMetadata struct {
+	Parents           []InheritsParent
 	PrimaryKeyColumns []string
+	TargetName        string
+	ChildColumns      []InheritsColumn
+}
+
+type InheritsColumn struct {
+	Name string
+	Type sql.Type
 }
 
 // WithResolvedChildren implements vitess.Injectable.
@@ -36,12 +57,18 @@ func (m *InheritsMetadata) WithResolvedChildren(context.Context, []any) (any, er
 	return &InheritsMetadataExpression{
 		Literal:           gmsexpression.NewLiteral(int32(0), pgtypes.Int32),
 		PrimaryKeyColumns: append([]string(nil), m.PrimaryKeyColumns...),
+		Parents:           append([]InheritsParent(nil), m.Parents...),
+		TargetName:        m.TargetName,
+		ChildColumns:      append([]InheritsColumn(nil), m.ChildColumns...),
 	}, nil
 }
 
 // InheritsMetadataExpression has a concrete Go type so SQL text cannot spoof
 // the marker. Literal supplies the leaf sql.Expression implementation.
 type InheritsMetadataExpression struct {
+	Parents []InheritsParent
 	*gmsexpression.Literal
 	PrimaryKeyColumns []string
+	TargetName        string
+	ChildColumns      []InheritsColumn
 }

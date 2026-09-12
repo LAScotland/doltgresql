@@ -162,7 +162,9 @@ func ReplaceSerial(ctx *sql.Context, a *analyzer.Analyzer, node sql.Node, scope 
 			OwnerColumn: col.Name,
 		}))
 	}
-	return pgnodes.NewCreateTable(createTable, ctSequences), transform.NewTree, nil
+	parents, _ := createTable.TableOpts[ast.InheritanceTableOption].(ast.ResolvedInheritanceParents)
+	delete(createTable.TableOpts, ast.InheritanceTableOption)
+	return pgnodes.NewCreateTable(createTable, ctSequences).WithInheritanceParents([]id.Table(parents)), transform.NewTree, nil
 }
 
 // generateSequenceName generates a unique sequence name for a SERIAL column in the table given

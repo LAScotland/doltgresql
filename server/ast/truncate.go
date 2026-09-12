@@ -28,6 +28,9 @@ func nodeTruncate(ctx *Context, node *tree.Truncate) (*vitess.DDL, error) {
 	if node == nil || len(node.Tables) == 0 {
 		return nil, nil
 	}
+	if node.Tables[0].ExplicitOnly {
+		return nil, errors.Errorf("TRUNCATE ONLY is not yet supported")
+	}
 	switch node.DropBehavior {
 	case tree.DropDefault:
 		// Default behavior, nothing to do

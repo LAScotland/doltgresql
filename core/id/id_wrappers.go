@@ -74,6 +74,9 @@ type Sequence Id
 // Table is an Id wrapper for tables. This wrapper must not be returned to the client.
 type Table Id
 
+// Inheritance identifies the inheritance metadata owned by one child table.
+type Inheritance Id
+
 // Tablespace is an Id wrapper for tablespaces. This wrapper must not be returned to the client.
 type Tablespace Id
 
@@ -238,6 +241,17 @@ func NewTable(schemaName string, tableName string) Table {
 	}
 	return Table(NewId(Section_Table, schemaName, tableName))
 }
+
+// NewInheritance returns the metadata ID for a schema-qualified child table.
+func NewInheritance(schemaName, tableName string) Inheritance {
+	if schemaName == "" && tableName == "" {
+		return Inheritance(Null)
+	}
+	return Inheritance(NewId(Section_Inheritance, schemaName, tableName))
+}
+
+func (id Inheritance) SchemaName() string { return Id(id).Segment(0) }
+func (id Inheritance) TableName() string  { return Id(id).Segment(1) }
 
 // NewTablespace returns a new Tablespace. This wrapper must not be returned to the client.
 func NewTablespace(tablespaceName string) Tablespace {
@@ -654,6 +668,9 @@ func (id Sequence) AsId() Id { return Id(id) }
 
 // AsId returns the unwrapped ID.
 func (id Table) AsId() Id { return Id(id) }
+
+// AsId returns the underlying inheritance metadata ID.
+func (id Inheritance) AsId() Id { return Id(id) }
 
 // AsId returns the unwrapped ID.
 func (id Tablespace) AsId() Id { return Id(id) }

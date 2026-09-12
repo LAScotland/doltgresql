@@ -16,18 +16,23 @@ package node
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
+	"github.com/dolthub/dolt/go/libraries/doltcore/doltdb"
+	"github.com/dolthub/dolt/go/libraries/doltcore/sqle/dsess"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/plan"
 
 	"github.com/dolthub/doltgresql/core"
+	"github.com/dolthub/doltgresql/core/id"
 )
 
 // CreateTable is a node that implements functionality specifically relevant to Doltgres' table creation needs.
 type CreateTable struct {
 	gmsCreateTable *plan.CreateTable
 	sequences      []*CreateSequence
+	parents        []id.Table
 }
 
 var _ sql.ExecBuilderNode = (*CreateTable)(nil)
@@ -41,6 +46,12 @@ func NewCreateTable(createTable *plan.CreateTable, sequences []*CreateSequence) 
 		gmsCreateTable: createTable,
 		sequences:      sequences,
 	}
+}
+
+func (c *CreateTable) WithInheritanceParents(parents []id.Table) *CreateTable {
+	nc := *c
+	nc.parents = append([]id.Table(nil), parents...)
+	return &nc
 }
 
 // Children implements the interface sql.ExecBuilderNode.
@@ -82,15 +93,35 @@ func (c *CreateTable) BuildRowIter(ctx *sql.Context, b sql.NodeExecBuilder, r sq
 		return nil, fmt.Errorf("table name `%s` cannot contain a parenthesized portion", c.gmsCreateTable.Name())
 	}
 
+	schemaName, err := core.GetSchemaName(ctx, c.gmsCreateTable.Db, "")
+	if err != nil {
+		return nil, err
+	}
+	var existing sql.Table
+	var preCreateRoot *core.RootValue
+	var doltSession *dsess.DoltSession
+	if len(c.parents) > 0 {
+		doltSession, preCreateRoot, err = core.GetRootFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		existing, err = core.GetSqlTableFromContext(ctx, "", doltdb.TableName{Name: c.Name(), Schema: schemaName})
+		if err != nil {
+			return nil, err
+		}
+		coll, err := core.GetInheritanceCollectionFromContext(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if err = coll.ValidateParents(id.NewTable(schemaName, c.Name()), c.parents); err != nil {
+			return nil, err
+		}
+	}
 	createTableIter, err := b.Build(ctx, c.gmsCreateTable, r)
 	if err != nil {
 		return nil, err
 	}
 
-	schemaName, err := core.GetSchemaName(ctx, c.gmsCreateTable.Db, "")
-	if err != nil {
-		return nil, err
-	}
 	for _, sequence := range c.sequences {
 		sequence.schema = schemaName
 		_, err = sequence.RowIter(ctx, r)
@@ -98,6 +129,9 @@ func (c *CreateTable) BuildRowIter(ctx *sql.Context, b sql.NodeExecBuilder, r sq
 			_ = createTableIter.Close(ctx)
 			return nil, err
 		}
+	}
+	if len(c.parents) > 0 && existing == nil {
+		return &inheritanceCreateIter{RowIter: createTableIter, child: id.NewTable(schemaName, c.Name()), parents: c.parents, session: doltSession, database: ctx.GetCurrentDatabase(), preCreateRoot: preCreateRoot}, nil
 	}
 	return createTableIter, err
 }
@@ -126,6 +160,7 @@ func (c *CreateTable) WithChildren(ctx *sql.Context, children ...sql.Node) (sql.
 	return &CreateTable{
 		gmsCreateTable: gmsCreateTable.(*plan.CreateTable),
 		sequences:      c.sequences,
+		parents:        c.parents,
 	}, nil
 }
 
@@ -151,4 +186,44 @@ func (c CreateTable) WithTargetSchema(schema sql.Schema) (sql.Node, error) {
 	c.gmsCreateTable = n.(*plan.CreateTable)
 
 	return &c, nil
+}
+
+// Attach graph metadata only after the underlying CREATE successfully produces its result.
+// Both table and graph changes are flushed inside the same PostgreSQL transaction.
+type inheritanceCreateIter struct {
+	sql.RowIter
+	child         id.Table
+	parents       []id.Table
+	session       *dsess.DoltSession
+	database      string
+	preCreateRoot *core.RootValue
+	attached      bool
+}
+
+func (i *inheritanceCreateIter) Next(ctx *sql.Context) (sql.Row, error) {
+	row, err := i.RowIter.Next(ctx)
+	if err != nil && err != io.EOF {
+		return row, err
+	}
+	if !i.attached {
+		coll, e := core.GetInheritanceCollectionFromContext(ctx, "")
+		if e != nil {
+			return nil, i.restoreRoot(ctx, e)
+		}
+		if e = coll.SetParents(ctx, i.child, i.parents); e != nil {
+			return nil, i.restoreRoot(ctx, e)
+		}
+		i.attached = true
+	}
+	return row, err
+}
+
+func (i *inheritanceCreateIter) restoreRoot(ctx *sql.Context, attachErr error) error {
+	if i.session == nil || i.preCreateRoot == nil {
+		return attachErr
+	}
+	if err := i.session.SetWorkingRoot(ctx, i.database, i.preCreateRoot); err != nil {
+		return fmt.Errorf("%w (also failed to restore root after inheritance metadata failure: %v)", attachErr, err)
+	}
+	return attachErr
 }

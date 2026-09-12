@@ -15,6 +15,7 @@
 package ast
 
 import (
+	"github.com/cockroachdb/errors"
 	vitess "github.com/dolthub/vitess/go/vt/sqlparser"
 
 	"github.com/dolthub/doltgresql/postgres/parser/sem/tree"
@@ -25,6 +26,9 @@ import (
 func nodeDelete(ctx *Context, node *tree.Delete) (*vitess.Delete, error) {
 	if node == nil {
 		return nil, nil
+	}
+	if explicitOnlyTable(node.Table) {
+		return nil, errors.Errorf("DELETE ONLY is not yet supported")
 	}
 	ctx.Auth().PushAuthType(auth.AuthType_DELETE)
 	defer ctx.Auth().PopAuthType()

@@ -29,6 +29,7 @@ import (
 	"github.com/dolthub/doltgresql/core/extensions"
 	"github.com/dolthub/doltgresql/core/functions"
 	"github.com/dolthub/doltgresql/core/id"
+	"github.com/dolthub/doltgresql/core/inheritance"
 	"github.com/dolthub/doltgresql/core/operators"
 	"github.com/dolthub/doltgresql/core/procedures"
 	"github.com/dolthub/doltgresql/core/rootobject/objinterface"
@@ -52,6 +53,7 @@ var (
 		&casts.Collection{},
 		&operators.Collection{},
 		&aggregates.Collection{},
+		&inheritance.Collection{},
 	}
 )
 

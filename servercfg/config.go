@@ -54,6 +54,7 @@ func (*DoltgresConfig) Overrides() sql.EngineOverrides {
 		},
 		Hooks: sql.ExecutionHooks{
 			RenameTable: sql.RenameTable{
+				PreSQLExecution:  hook.BeforeTableRename,
 				PostSQLExecution: hook.AfterTableRename,
 			},
 			DropTable: sql.DropTable{
@@ -64,6 +65,7 @@ func (*DoltgresConfig) Overrides() sql.EngineOverrides {
 				PostSQLExecution: hook.AfterTableAddColumn,
 			},
 			TableRenameColumn: sql.TableRenameColumn{
+				PreSQLExecution:  hook.BeforeTableRenameColumn,
 				PostSQLExecution: hook.AfterTableRenameColumn,
 			},
 			TableModifyColumn: sql.TableModifyColumn{

@@ -31,6 +31,7 @@ type beforeTableModifyColumnChange uint8
 const (
 	beforeTableModifyColumnChange_None beforeTableModifyColumnChange = iota
 	beforeTableModifyColumnChange_Type
+	beforeTableModifyColumnChange_Nullability
 )
 
 // BeforeTableModifyColumn handles validation that's unique to Doltgres.
@@ -47,6 +48,8 @@ func BeforeTableModifyColumn(ctx *sql.Context, runner sql.StatementRunner, nodeI
 		if col.Name == newColumn.Name {
 			if !col.Type.Equals(newColumn.Type) {
 				changed = beforeTableModifyColumnChange_Type
+			} else if col.Nullable != newColumn.Nullable {
+				changed = beforeTableModifyColumnChange_Nullability
 			}
 		}
 	}
@@ -58,6 +61,16 @@ func BeforeTableModifyColumn(ctx *sql.Context, runner sql.StatementRunner, nodeI
 	doltTable := core.SQLNodeToDoltTable(n.Table)
 	if doltTable == nil {
 		// If this table isn't a Dolt table then we don't have anything to do
+		return n, nil
+	}
+	action := "alter the nullability of"
+	if changed == beforeTableModifyColumnChange_Type {
+		action = "alter the type of"
+	}
+	if err := RejectInheritedColumnMutation(ctx, action, newColumn.Name, doltTable.TableName()); err != nil {
+		return nil, err
+	}
+	if changed == beforeTableModifyColumnChange_Nullability {
 		return n, nil
 	}
 	if err := ValidateColumnTypeChangeForTable(ctx, doltTable.TableName()); err != nil {

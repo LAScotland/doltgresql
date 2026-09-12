@@ -33,6 +33,24 @@ func nodeAlterTable(ctx *Context, node *tree.AlterTable) (vitess.Statement, erro
 	}
 
 	treeTableName := node.Table.ToTableName()
+	if treeTableName.ExplicitOnly {
+		for _, cmd := range node.Cmds {
+			switch cmd := cmd.(type) {
+			case *tree.AlterTableAddConstraint:
+				// PostgreSQL primary, unique and foreign keys belong only to
+				// the named relation regardless of the ONLY modifier.
+				switch cmd.ConstraintDef.(type) {
+				case *tree.UniqueConstraintTableDef, *tree.ForeignKeyConstraintTableDef:
+					continue
+				}
+			case *tree.AlterTableSetDefault:
+				// The analyzer rejects parent default changes until recursive
+				// defaults are implemented; leaves retain physical semantics.
+				continue
+			}
+			return nil, errors.Errorf("this ALTER TABLE ONLY operation is not yet supported")
+		}
+	}
 	tableName, err := nodeTableName(ctx, &treeTableName)
 	if err != nil {
 		return nil, err

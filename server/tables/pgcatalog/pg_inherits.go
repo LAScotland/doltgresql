@@ -15,7 +15,9 @@
 package pgcatalog
 
 import (
-	"io"
+	"github.com/dolthub/doltgresql/core"
+	"github.com/dolthub/doltgresql/core/inheritance"
+	"github.com/dolthub/doltgresql/core/rootobject/objinterface"
 
 	"github.com/dolthub/go-mysql-server/sql"
 
@@ -43,9 +45,22 @@ func (p PgInheritsHandler) Name() string {
 
 // RowIter implements the interface tables.Handler.
 func (p PgInheritsHandler) RowIter(ctx *sql.Context, partition sql.Partition) (sql.RowIter, error) {
-	// pg_inherits is currently empty, since table inheritance and declarative partitioning are not supported.
-	// TODO: fill this in when table inheritance or partitioning is supported
-	return emptyRowIter()
+	coll, err := core.GetInheritanceCollectionFromContext(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	rows := []sql.Row{}
+	err = coll.IterAll(ctx, func(obj objinterface.RootObject) (bool, error) {
+		edge := obj.(inheritance.Edge)
+		for i, parent := range edge.Parents {
+			rows = append(rows, sql.Row{edge.Child.AsId(), parent.AsId(), int32(i + 1), false})
+		}
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sql.RowsToRowIter(rows...), nil
 }
 
 // PkSchema implements the interface tables.Handler.
@@ -62,20 +77,4 @@ var pgInheritsSchema = sql.Schema{
 	{Name: "inhparent", Type: pgtypes.Oid, Default: nil, Nullable: false, Source: PgInheritsName},
 	{Name: "inhseqno", Type: pgtypes.Int32, Default: nil, Nullable: false, Source: PgInheritsName},
 	{Name: "inhdetachpending", Type: pgtypes.Bool, Default: nil, Nullable: false, Source: PgInheritsName},
-}
-
-// pgInheritsRowIter is the sql.RowIter for the pg_inherits table.
-type pgInheritsRowIter struct {
-}
-
-var _ sql.RowIter = (*pgInheritsRowIter)(nil)
-
-// Next implements the interface sql.RowIter.
-func (iter *pgInheritsRowIter) Next(ctx *sql.Context) (sql.Row, error) {
-	return nil, io.EOF
-}
-
-// Close implements the interface sql.RowIter.
-func (iter *pgInheritsRowIter) Close(ctx *sql.Context) error {
-	return nil
 }

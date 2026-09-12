@@ -27,6 +27,25 @@ import (
 	pgtypes "github.com/dolthub/doltgresql/server/types"
 )
 
+// BeforeTableRenameColumn rejects renaming an inherited column or a column inherited by descendants.
+func BeforeTableRenameColumn(ctx *sql.Context, runner sql.StatementRunner, nodeInterface sql.Node) (sql.Node, error) {
+	n, ok := nodeInterface.(*plan.RenameColumn)
+	if !ok {
+		return nil, errors.Errorf("RENAME COLUMN pre-hook expected `*plan.RenameColumn` but received `%T`", nodeInterface)
+	}
+	if n.ColumnName == n.NewColumnName {
+		return n, nil
+	}
+	doltTable := core.SQLNodeToDoltTable(n.Table)
+	if doltTable == nil {
+		return n, nil
+	}
+	if err := RejectInheritedColumnMutation(ctx, "rename", n.ColumnName, doltTable.TableName()); err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
 // AfterTableRenameColumn handles updating various table columns, alongside other validation that's unique to Doltgres.
 func AfterTableRenameColumn(ctx *sql.Context, runner sql.StatementRunner, nodeInterface sql.Node) error {
 	n, ok := nodeInterface.(*plan.RenameColumn)
