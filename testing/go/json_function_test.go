@@ -1241,6 +1241,16 @@ func TestJsonObjectKeys(t *testing.T) {
 func TestJsonbEachText(t *testing.T) {
 	RunScripts(t, []ScriptTest{
 		{
+			Name: "jsonb_each_text untyped argument output schema",
+			Assertions: []ScriptTestAssertion{
+				{Query: `SELECT key, value FROM jsonb_each_text('{"d":12.340}');`, Expected: []sql.Row{{"d", "12.34"}}, ExpectedColNames: []string{"key", "value"}},
+				{Query: `SELECT * FROM jsonb_each_text('{"d":12.340}');`, Expected: []sql.Row{{"d", "12.34"}}, ExpectedColNames: []string{"key", "value"}},
+				{Query: `SELECT e.key, e.value FROM jsonb_each_text('{"d":12.340}') AS e;`, Expected: []sql.Row{{"d", "12.34"}}, ExpectedColNames: []string{"key", "value"}},
+				{Query: `SELECT k, v FROM jsonb_each_text('{"d":12.340}') AS e(k, v);`, Expected: []sql.Row{{"d", "12.34"}}, ExpectedColNames: []string{"k", "v"}},
+				{Query: `SELECT * FROM jsonb_each_text(NULL);`, Expected: []sql.Row{}, ExpectedColNames: []string{"key", "value"}},
+			},
+		},
+		{
 			Name: "jsonb_each_text values and errors",
 			Assertions: []ScriptTestAssertion{
 				{

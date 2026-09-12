@@ -15,12 +15,9 @@
 package ast
 
 import (
-	"github.com/dolthub/go-mysql-server/sql/expression"
-
 	vitess "github.com/dolthub/vitess/go/vt/sqlparser"
 
 	"github.com/dolthub/doltgresql/postgres/parser/sem/tree"
-	pgexprs "github.com/dolthub/doltgresql/server/expression"
 )
 
 // nodeSelectClause handles tree.SelectClause nodes.
@@ -222,18 +219,10 @@ func rewriteTableFuncExprs(fromExpr vitess.TableExpr) vitess.TableExpr {
 				if valuesStatement, ok := subquerySelect.From[0].(*vitess.ValuesStatement); ok {
 					if len(valuesStatement.Columns) == 0 && len(valuesStatement.Rows) == 1 && len(valuesStatement.Rows[0]) == 1 {
 						if funcExpr, ok := valuesStatement.Rows[0][0].(*vitess.FuncExpr); ok {
-							// It appears that GMS hardcodes the expectation of vitess literals here, so we have to
-							// convert from Doltgres literals to GMS literals. Eventually we need to remove this
-							// hardcoded behavior.
-							for _, fExpr := range funcExpr.Exprs {
-								if aliasedExpr, ok := fExpr.(*vitess.AliasedExpr); ok {
-									if injectedExpr, ok := aliasedExpr.Expr.(vitess.InjectedExpr); ok {
-										if literal, ok := injectedExpr.Expression.(*expression.Literal); ok {
-											aliasedExpr.Expr = pgexprs.ToVitessLiteral(literal)
-										}
-									}
-								}
-							}
+							// Preserve injected Doltgres literals here. In particular, an untyped string must remain
+							// UNKNOWN until PostgreSQL overload resolution selects the table function's parameter
+							// type; converting it to a Vitess literal prematurely changes it to TEXT and can also
+							// hide a record-returning function's named output columns from the plan builder.
 							// The TableFuncExpr keeps the user's alias (possibly empty): a fabricated alias would
 							// rename a single-column function result to the function's name, clobbering the column
 							// name that a named OUT parameter provides (e.g. pg_partition_ancestors's relid).
